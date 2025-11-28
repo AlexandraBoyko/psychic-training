@@ -64,16 +64,23 @@ public:
 	Terrain() {};
 
 	void InitializeTerrain(ID3D12Device* Device, int HeightMapIndex, float worldSize, int maxLOD);
-	void BuildTerrainGeometry();
+	//void BuildTerrainGeometry();
 	void BuildTerrainMaterials();
 	void BuildTerrainRenderItems();
 	void UpdateTerrain();
 	void DrawTerrain();
-	
-
+	//void GenerateTileGeometry(const XMFLOAT3& worldPos, float tileSize,
+		//int lodLevel, std::vector<Vertex>& vertices,
+		//std::vector<std::uint32_t>& indices);
+		
 	void BuildQuadTree(TreeNode* node, int x, int y, int size, int depth);
 	BoundingBox CalculateAABB(const XMFLOAT3& pos, float size);
 	void UpdateQuadTree();
+
+
+	std::vector<std::shared_ptr<TerrainTile>>& GetAllTiles() {
+		return mTerrainTiles;
+	}
 
 private:
 	float mWorldSize;
@@ -82,6 +89,8 @@ private:
 	int tileIndex = 0;
 	std::unique_ptr<TreeNode> mRoot;
 	std::vector<std::shared_ptr<TerrainTile>> mTerrainTiles;
+
+
 };
 
 
@@ -154,6 +163,9 @@ void Terrain::BuildQuadTree(TreeNode* node, int x, int y, int size, int depth) {
 		}
 	}
 }
+
+
+
 
 struct RenderItem
 {
@@ -243,6 +255,10 @@ private:
 	std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> GetStaticSamplers();
 
 	void BuildBillboardGeometry();
+	void BuildTerrainGeometry();
+	void BuildTileGeometry(const XMFLOAT3& worldPos, float tileSize,
+		int lodLevel, std::vector<Vertex>& vertices,
+		std::vector<std::uint32_t>& indices);
 
 private:
 	std::unordered_map<std::string, unsigned int>ObjectsMeshCount;
@@ -375,6 +391,7 @@ bool TexColumnsApp::Initialize()
 
 
 	BuildShapeGeometry();
+	BuildTerrainGeometry();
 	BuildShadersAndInputLayout();
 	BuildMaterials();
 	BuildPSOs();
@@ -1487,6 +1504,251 @@ void TexColumnsApp::UpdateLODs(RenderItem* ri)
 	ri->NumFramesDirty = gNumFrameResources;
 }
 
+void TexColumnsApp::BuildTerrainGeometry() {
+	// MeshGeometry for terrain & buffeers for it
+	auto terrainGeo = std::make_unique<MeshGeometry>();
+	terrainGeo->Name = "terrainGeo";
+
+
+	std::vector<Vertex> allVertices;
+	std::vector<std::uint32_t> allIndices;
+
+	auto& allTiles = mTerrain->GetAllTiles();
+
+	// geom for each tile
+	for (int tileIdx = 0; tileIdx < allTiles.size(); tileIdx++) {
+		auto& tile = allTiles[tileIdx];
+
+
+		std::vector<Vertex> tileVertices;
+		std::vector<std::uint32_t> tileIndices;
+
+
+		BuildTileGeometry(tile->worldPos, tile->tileSize, tile->lodLevel,
+			tileVertices, tileIndices);
+
+
+		UINT baseVertex = static_cast<UINT>(allVertices.size());
+
+
+		for (auto& index : tileIndices) {
+			index += baseVertex;
+		}
+
+
+		SubmeshGeometry submesh;
+		submesh.IndexCount = static_cast<UINT>(tileIndices.size());
+		submesh.StartIndexLocation = static_cast<UINT>(allIndices.size());
+		submesh.BaseVertexLocation = 0; 
+
+		// "tile_0_LOD_0", "tile_1_LOD_1"...
+		std::string submeshName = "tile_" + std::to_string(tileIdx) +
+			"_LOD_" + std::to_string(tile->lodLevel);
+		terrainGeo->DrawArgs[submeshName] = submesh;
+
+
+		allVertices.insert(allVertices.end(), tileVertices.begin(), tileVertices.end());
+		allIndices.insert(allIndices.end(), tileIndices.begin(), tileIndices.end());
+	}
+
+
+
+	const UINT vbByteSize = static_cast<UINT>(allVertices.size() * sizeof(Vertex));
+	const UINT ibByteSize = static_cast<UINT>(allIndices.size() * sizeof(std::uint32_t));
+
+	ThrowIfFailed(D3DCreateBlob(vbByteSize, &terrainGeo->VertexBufferCPU));
+	CopyMemory(terrainGeo->VertexBufferCPU->GetBufferPointer(), allVertices.data(), vbByteSize);
+
+	ThrowIfFailed(D3DCreateBlob(ibByteSize, &terrainGeo->IndexBufferCPU));
+	CopyMemory(terrainGeo->IndexBufferCPU->GetBufferPointer(), allIndices.data(), ibByteSize);
+
+
+	terrainGeo->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+		mCommandList.Get(), allVertices.data(), vbByteSize, terrainGeo->VertexBufferUploader);
+
+	terrainGeo->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+		mCommandList.Get(), allIndices.data(), ibByteSize, terrainGeo->IndexBufferUploader);
+
+
+	terrainGeo->VertexByteStride = sizeof(Vertex);
+	terrainGeo->VertexBufferByteSize = vbByteSize;
+	terrainGeo->IndexFormat = DXGI_FORMAT_R32_UINT;
+	terrainGeo->IndexBufferByteSize = ibByteSize;
+
+	mGeometries[terrainGeo->Name] = std::move(terrainGeo);
+}
+
+void TexColumnsApp::BuildTileGeometry(const XMFLOAT3& worldPos, float tileSize,
+	int lodLevel, std::vector<Vertex>& vertices,
+	std::vector<std::uint32_t>& indices) {
+
+	int baseResolution = 64;
+	float lodFactor = 0.5f;
+
+	int resolution = static_cast<int>(baseResolution * std::pow(lodFactor, lodLevel));
+	resolution = max(resolution, 4); 
+
+
+	vertices.clear();
+	indices.clear();
+
+
+
+	float stepSize = tileSize / (resolution - 1);
+	float skirtDepth = 10.0f; 
+
+
+
+	for (int z = 0; z < resolution; z++) {
+		for (int x = 0; x < resolution; x++) {
+			Vertex vertex;
+
+
+			vertex.Pos = XMFLOAT3(
+				worldPos.x + x * stepSize,     // X
+				0.0f,                          // Y 
+				worldPos.z + z * stepSize      // Z
+			);
+
+			// UV
+			vertex.TexC = XMFLOAT2(
+				static_cast<float>(x) / (resolution - 1),
+				static_cast<float>(z) / (resolution - 1)
+			);
+
+			// normal
+			vertex.Normal = XMFLOAT3(0.0f, 1.0f, 0.0f);
+
+			// tagn
+			vertex.Tangent = XMFLOAT3(1.0f, 0.0f, 0.0f);
+
+			vertices.push_back(vertex);
+		}
+	}
+
+	//skirts
+
+	int mainVertexCount = static_cast<int>(vertices.size());
+
+
+	for (int z = 0; z < resolution; z++) {
+		Vertex skirtVertex = vertices[z * resolution];
+		skirtVertex.Pos.y = -skirtDepth;  
+		vertices.push_back(skirtVertex);
+	}
+
+	for (int z = 0; z < resolution; z++) {
+		Vertex skirtVertex = vertices[z * resolution + (resolution - 1)];
+		skirtVertex.Pos.y = -skirtDepth;
+		vertices.push_back(skirtVertex);
+	}
+
+
+	for (int x = 1; x < resolution - 1; x++) {
+		Vertex skirtVertex = vertices[x];  
+		skirtVertex.Pos.y = -skirtDepth;
+		vertices.push_back(skirtVertex);
+	}
+
+
+	for (int x = 1; x < resolution - 1; x++) {
+		Vertex skirtVertex = vertices[(resolution - 1) * resolution + x];
+		skirtVertex.Pos.y = -skirtDepth;
+		vertices.push_back(skirtVertex);
+	}
+
+
+	for (int z = 0; z < resolution - 1; z++) {
+		for (int x = 0; x < resolution - 1; x++) {
+			
+			UINT topLeft = z * resolution + x;
+			UINT topRight = topLeft + 1;
+			UINT bottomLeft = (z + 1) * resolution + x;
+			UINT bottomRight = bottomLeft + 1;
+
+
+			indices.push_back(topLeft);
+			indices.push_back(bottomLeft);
+			indices.push_back(topRight);
+
+
+			indices.push_back(topRight);
+			indices.push_back(bottomLeft);
+			indices.push_back(bottomRight);
+		}
+	}
+
+
+	int leftSkirtStart = mainVertexCount;
+	int rightSkirtStart = leftSkirtStart + resolution;
+	int bottomSkirtStart = rightSkirtStart + resolution;
+	int topSkirtStart = bottomSkirtStart + (resolution - 2);
+
+	
+	for (int z = 0; z < resolution - 1; z++) {
+		UINT edge1 = z * resolution;           
+		UINT edge2 = (z + 1) * resolution;     
+		UINT skirt1 = leftSkirtStart + z;      
+		UINT skirt2 = leftSkirtStart + z + 1;  
+
+
+		indices.push_back(edge1);
+		indices.push_back(skirt1);
+		indices.push_back(edge2);
+
+		indices.push_back(edge2);
+		indices.push_back(skirt1);
+		indices.push_back(skirt2);
+	}
+
+	// Правая юбка
+	for (int z = 0; z < resolution - 1; z++) {
+		UINT edge1 = z * resolution + (resolution - 1);
+		UINT edge2 = (z + 1) * resolution + (resolution - 1);
+		UINT skirt1 = rightSkirtStart + z;
+		UINT skirt2 = rightSkirtStart + z + 1;
+
+		indices.push_back(edge1);
+		indices.push_back(edge2);
+		indices.push_back(skirt1);
+
+		indices.push_back(edge2);
+		indices.push_back(skirt2);
+		indices.push_back(skirt1);
+	}
+
+	// Нижняя юбка
+	for (int x = 1; x < resolution - 2; x++) {
+		UINT edge1 = x;
+		UINT edge2 = x + 1;
+		UINT skirt1 = bottomSkirtStart + (x - 1);
+		UINT skirt2 = bottomSkirtStart + x;
+
+		indices.push_back(edge1);
+		indices.push_back(edge2);
+		indices.push_back(skirt1);
+
+		indices.push_back(edge2);
+		indices.push_back(skirt2);
+		indices.push_back(skirt1);
+	}
+
+	// Верхняя юбка
+	for (int x = 1; x < resolution - 2; x++) {
+		UINT edge1 = (resolution - 1) * resolution + x;
+		UINT edge2 = (resolution - 1) * resolution + x + 1;
+		UINT skirt1 = topSkirtStart + (x - 1);
+		UINT skirt2 = topSkirtStart + x;
+
+		indices.push_back(edge1);
+		indices.push_back(skirt1);
+		indices.push_back(edge2);
+
+		indices.push_back(edge2);
+		indices.push_back(skirt1);
+		indices.push_back(skirt2);
+	}
+}
 
 std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> TexColumnsApp::GetStaticSamplers()
 {
