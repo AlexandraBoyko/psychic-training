@@ -32,6 +32,38 @@ struct LodLevel
 };
 // Lightweight structure stores parameters to draw a shape.  This will
 // vary from app-to-app.
+
+
+
+struct TerrainTile {
+	XMFLOAT3 worldPos;
+	float tileSize;
+	int lodLevel;
+	int tileIndex;
+	DirectX::BoundingBox Bounds;
+	int rItemIndex;
+	int NumFramesDirty;
+};
+
+
+class QuadTree {
+	std::unique_ptr<QuadTree> children[4];
+	TerrainTile* tile = nullptr;
+	BoundingBox boundingBox;
+	int depth = 0;
+
+public:
+	void BuildQuadTree();
+	void UpdateQuadTree();
+
+};
+
+class Terrain {
+public:
+	void InitializeTerrain();
+};
+
+
 struct RenderItem
 {
 	std::vector<LodLevel> LodLevels; 
