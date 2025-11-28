@@ -39,6 +39,7 @@ struct TerrainTile {
 	XMFLOAT3 worldPos;
 	float tileSize;
 	int lodLevel;
+	int maxLodLevel = 6;
 	int tileIndex;
 	DirectX::BoundingBox Bounds;
 	int rItemIndex;
@@ -46,21 +47,28 @@ struct TerrainTile {
 };
 
 
-class QuadTree {
-	std::unique_ptr<QuadTree> children[4];
+class TreeNode {
+	std::unique_ptr<TreeNode> children[4]; //yeeeah im stupid and forgot how to write trees
 	TerrainTile* tile = nullptr;
 	BoundingBox boundingBox;
 	int depth = 0;
 
 public:
-	void BuildQuadTree();
-	void UpdateQuadTree();
+	bool SplitNode();
 
 };
 
 class Terrain {
 public:
+	Terrain() {};
+
 	void InitializeTerrain();
+	void UpdateTerrain();
+	void BuildQuadTree();
+	void UpdateQuadTree();
+
+	float worldSize = 512.f;
+	int maxLodLevel = 6;
 };
 
 
