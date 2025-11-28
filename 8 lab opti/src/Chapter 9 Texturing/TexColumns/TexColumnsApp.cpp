@@ -48,13 +48,14 @@ struct TerrainTile {
 
 
 class TreeNode {
+public:
 	std::unique_ptr<TreeNode> children[4]; //yeeeah im stupid and forgot how to write trees
 	TerrainTile* tile = nullptr;
-	BoundingBox boundingBox;
+	BoundingBox Bounds;
 	int depth = 0;
 
-public:
-	bool SplitNode();
+
+	bool SplitTreeNode();
 
 };
 
@@ -62,15 +63,97 @@ class Terrain {
 public:
 	Terrain() {};
 
-	void InitializeTerrain();
+	void InitializeTerrain(ID3D12Device* Device, int HeightMapIndex, float worldSize, int maxLOD);
+	void BuildTerrainGeometry();
+	void BuildTerrainMaterials();
+	void BuildTerrainRenderItems();
 	void UpdateTerrain();
-	void BuildQuadTree();
+	void DrawTerrain();
+	
+
+	void BuildQuadTree(TreeNode* node, int x, int y, int size, int depth);
+	BoundingBox CalculateAABB(const XMFLOAT3& pos, float size);
 	void UpdateQuadTree();
 
-	float worldSize = 512.f;
-	int maxLodLevel = 6;
+private:
+	float mWorldSize;
+	int mMaxLodLevel;
+	int mHeightMapIndex;
+	int tileIndex = 0;
+	std::unique_ptr<TreeNode> mRoot;
+	std::vector<std::shared_ptr<TerrainTile>> mTerrainTiles;
 };
 
+
+void Terrain::InitializeTerrain(ID3D12Device* Device, int HeightMapIndex, float worldSize, int maxLOD) {
+	//init quad tree
+	mRoot = std::make_unique<TreeNode>();
+	mRoot->depth = 0;
+	//init original data
+	mWorldSize = worldSize;
+	mMaxLodLevel = maxLOD;
+	mHeightMapIndex = HeightMapIndex;
+
+	int initialSize = (int)worldSize; // 2^maxLOD
+	BuildQuadTree(mRoot.get(), 0, 0, initialSize, 0);
+
+	std::cout << "TERRAINED" << std::endl;
+}
+
+BoundingBox Terrain::CalculateAABB(const XMFLOAT3& pos, float size) {
+	BoundingBox aabb;
+
+	// ћинимальна€ точка (нижний левый задний угол)
+	XMFLOAT3 minPoint = XMFLOAT3(pos.x, 0.0f, pos.z);
+
+	// ћаксимальна€ точка (верхний правый передний угол)  
+	XMFLOAT3 maxPoint = XMFLOAT3(pos.x + size, 100.0f, pos.z + size);
+
+	// —оздаем AABB из двух противоположных углов
+	BoundingBox::CreateFromPoints(aabb,
+		XMLoadFloat3(&minPoint),
+		XMLoadFloat3(&maxPoint));
+
+	return aabb;
+}
+void Terrain::BuildQuadTree(TreeNode* node, int x, int y, int size, int depth) {
+	node->depth = depth;
+
+
+	float tileSize = mWorldSize / (1 << depth);  // mWorldSize / 2^depth
+
+	// TerrainTile fpr node
+	auto tile = std::make_shared<TerrainTile>();
+	tile->worldPos = XMFLOAT3((float)x * tileSize, 0.0f, (float)y * tileSize);
+	tile->tileSize = tileSize;
+	tile->lodLevel = depth;
+	tile->tileIndex = tileIndex++;
+
+	//calculate bb using AABB
+	tile->Bounds = CalculateAABB(tile->worldPos, tileSize);
+	node->Bounds = tile->Bounds;
+
+	//saveed
+	mTerrainTiles.push_back(tile);
+	node->tile = tile.get();
+
+	// child nodees
+	if (depth < mMaxLodLevel) {
+		int halfSize = size / 2;
+
+		for (int i = 0; i < 4; i++) {
+
+			node->children[i] = std::make_unique<TreeNode>();
+
+			int childX = x + (i % 2) * halfSize;
+			int childY = y + (i / 2) * halfSize;
+
+			// recursion
+			std::cout << "WE NEED MORE LAND" << std::endl;
+			BuildQuadTree(node->children[i].get(), childX, childY, halfSize, depth + 1);
+		}
+	}
+}
 
 struct RenderItem
 {
@@ -188,7 +271,7 @@ private:
 	std::vector<RenderItem*> mVisibleRitems;
 	// Render items divided by PSO.
 	std::vector<RenderItem*> mOpaqueRitems;
-
+	std::unique_ptr<Terrain> mTerrain;
 	PassConstants mMainPassCB;
 
 	XMFLOAT3 mEyePos = { 0.0f, 0.0f, 0.0f };
@@ -284,6 +367,13 @@ bool TexColumnsApp::Initialize()
 	LoadAllTextures();
 	BuildRootSignature();
 	BuildDescriptorHeaps();
+
+	//terrain stuff
+	mTerrain = std::make_unique<Terrain>();
+	mTerrain->InitializeTerrain(md3dDevice.Get(), TexOffsets["textures/terr_height"],
+		512, 6);
+
+
 	BuildShapeGeometry();
 	BuildShadersAndInputLayout();
 	BuildMaterials();
