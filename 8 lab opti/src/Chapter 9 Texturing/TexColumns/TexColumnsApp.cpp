@@ -421,87 +421,7 @@ void TexColumnsApp::OnResize()
 
 void TexColumnsApp::Update(const GameTimer& gt)
 {
-	__m128 headpos;
-	headpos.m128_f32[0] = 0;
-	headpos.m128_f32[1] = 0;
-	headpos.m128_f32[2] = 0;
 
-
-	XMVECTOR lookDir = XMVectorSubtract(cam.GetPosition(), headpos);
-	lookDir = XMVector3Normalize(lookDir);
-
-	// Предположим, что голова по умолчанию смотрит вдаль по оси Z. Тогда можно вычислить угол поворота по оси Y (yaw).
-	float yaw = atan2f(XMVectorGetX(lookDir), XMVectorGetZ(lookDir));
-	// Если нужно добавить угол наклона (pitch), его можно вычислить аналогично.
-
-	// Создаем матрицу поворота головы. Здесь roll = 0, а pitch можно задать, если требуется.
-	XMMATRIX headRotation = XMMatrixRotationRollPitchYaw(0.0f, 3.14 + yaw, 0.0f);
-
-	// Итоговая мировая матрица головы:
-	XMMATRIX worldHead = headRotation;
-
-
-
-
-	__m128 leftpos;
-	leftpos.m128_f32[0] = 0.73;
-	leftpos.m128_f32[1] = 3.9;
-	leftpos.m128_f32[2] = 1.1;
-	__m128 rightpos;
-	rightpos.m128_f32[0] = -0.73;
-	rightpos.m128_f32[1] = 3.9;
-	rightpos.m128_f32[2] = 1.1;
-	XMVECTOR leftDir = XMVector3Normalize(cam.GetPosition() - leftpos);
-	XMVECTOR rightDir = XMVector3Normalize(cam.GetPosition() - rightpos);
-
-	// Базовое направление для глаз (они смотрят вдаль по Z)
-	XMVECTOR defaultForward = XMVectorSet(0.0f, 0.0f, -1.0f, 0.0f);
-
-	// Для левого глаза:
-	XMVECTOR leftAxis = XMVector3Normalize(XMVector3Cross(defaultForward, leftDir));
-	float leftDot = XMVectorGetX(XMVector3Dot(defaultForward, leftDir));
-	float leftAngle = acosf(leftDot);
-	XMVECTOR leftQuat = XMQuaternionRotationAxis(leftAxis, leftAngle);
-	leftQuat = XMQuaternionNormalize(leftQuat);
-	XMMATRIX leftRotation = XMMatrixRotationQuaternion(leftQuat);
-
-	// Аналогично для правого глаза:
-	XMVECTOR rightAxis = XMVector3Normalize(XMVector3Cross(defaultForward, rightDir));
-	float rightDot = XMVectorGetX(XMVector3Dot(defaultForward, rightDir));
-	float rightAngle = acosf(rightDot);
-	XMVECTOR rightQuat = XMQuaternionRotationAxis(rightAxis, rightAngle);
-	rightQuat = XMQuaternionNormalize(rightQuat);
-	XMMATRIX rightRotation = XMMatrixRotationQuaternion(rightQuat);
-
-
-
-
-
-	for (auto& rItem : mAllRitems)
-	{
-		if (rItem->Name == "eyeL")
-		{
-
-			XMStoreFloat4x4(&rItem->World, XMMatrixScaling(3, 3, 3) * XMMatrixTranslation(0.63, 0.9, -1.1) * XMMatrixTranslation(0, 3, 0) * worldHead);
-			rItem->NumFramesDirty = gNumFrameResources;
-		}
-		if (rItem->Name == "eyeR")
-		{
-			XMStoreFloat4x4(&rItem->World, XMMatrixScaling(3, 3, 3) * XMMatrixTranslation(-0.63, 0.9, -1.1) * XMMatrixTranslation(0, 3, 0) * worldHead);
-			rItem->NumFramesDirty = gNumFrameResources;
-		}
-		if (rItem->Name == "nigga")
-		{
-			XMStoreFloat4x4(&rItem->World, XMMatrixScaling(3, 3, 3) * XMMatrixTranslation(0, 3, 0) * worldHead);
-			rItem->NumFramesDirty = gNumFrameResources;
-		}
-		if (rItem->Name == "box")
-		{
-			XMMATRIX a = XMLoadFloat4x4(&rItem->TexTransform);
-			XMStoreFloat4x4(&rItem->TexTransform, a * XMMatrixTranslation(-0.5, -0.5, 0) * XMMatrixRotationRollPitchYaw(0, 0, gt.DeltaTime() * 3) * XMMatrixTranslation(0.5, 0.5, 0));
-			rItem->NumFramesDirty = gNumFrameResources;
-		}
-	}
 	// Cycle through the circular frame resource array.
 	mCurrFrameResourceIndex = (mCurrFrameResourceIndex + 1) % gNumFrameResources;
 	mCurrFrameResource = mFrameResources[mCurrFrameResourceIndex].get();
@@ -1293,6 +1213,9 @@ void TexColumnsApp::BuildMaterials()
 	CreateMaterial("map2", 0, TexOffsets["textures/HeightMap"], TexOffsets["textures/HeightMap"], XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f), XMFLOAT3(0.05f, 0.05f, 0.05f), 0.3f);
 	CreateMaterial("diablo_mat", 0, TexOffsets["textures/diablo"], TexOffsets["textures/diablo_nm"], XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f), XMFLOAT3(0.05f, 0.05f, 0.05f), 0.3f);
 	CreateMaterial("bb_mat", 0, TexOffsets["textures/bb"], TexOffsets["textures/default_nmap"], XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f), XMFLOAT3(0.05f, 0.05f, 0.05f), 0.3f);
+
+
+	CreateMaterial("terr_mat", (int)mMaterials.size(), TexOffsets["textures/terr_diffuse"], TexOffsets["textures/terr_normal"], XMFLOAT4(0.8f, 0.8f, 0.8f, 1.0f), XMFLOAT3(0.02f, 0.02f, 0.02f),0.8f);
 	
 }
 void TexColumnsApp::RenderCustomMesh(std::string unique_name, std::string meshname,
