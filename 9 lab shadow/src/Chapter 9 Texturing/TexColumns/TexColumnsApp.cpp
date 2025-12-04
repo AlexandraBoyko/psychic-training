@@ -1966,6 +1966,10 @@ void TexColumnsApp::BuildFrameResources()
 		if (mLights[i].CastsShadows && mLights[i].ShadowMapSrvHeapIndex > 0)
 			mShadowCastingLights.push_back(i);
 	}
+	for (auto& t : mTerrain->GetAllTiles())
+	{
+		t->NumFramesDirty = gNumFrameResources;
+	}
 }
 
 void TexColumnsApp::BuildMaterials()
@@ -2023,6 +2027,45 @@ void TexColumnsApp::BuildRenderItems()
 	BuildFrameResources();
 	for (auto& e : mAllRitems)
 	{
+		mOpaqueRitems.push_back(e.get());
+	}
+
+	std::vector<std::shared_ptr<Tile>>& allTiles = mTerrain->GetAllTiles();
+	// Теперь, для каждого видимого тайла, создаем или обновляем его RenderItem.
+	int a = 0;
+	for (auto& tile : allTiles)
+	{
+		auto renderItem = std::make_unique<RenderItem>();
+		renderItem->World = MathHelper::Identity4x4();
+		renderItem->TexTransform = MathHelper::Identity4x4();
+		renderItem->ObjCBIndex = static_cast<int>(mAllRitems.size());
+		renderItem->Mat = mMaterials["TerrainMaterial"].get();
+		renderItem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+		renderItem->Name = "TILE";
+		// Выбираем LOD-уровень в зависимости от глубины узла квадродерева.
+		int lodIndex = tile->lodLevel;
+		std::string lodName = "tile_" + std::to_string(tile->tileIndex) + "_LOD_" + std::to_string(lodIndex);
+		renderItem->Geo = mGeometries["terrainGeo"].get();
+		renderItem->IndexCount = renderItem->Geo->DrawArgs[lodName].IndexCount;
+		renderItem->StartIndexLocation = renderItem->Geo->DrawArgs[lodName].StartIndexLocation;
+		renderItem->BaseVertexLocation = renderItem->Geo->DrawArgs[lodName].BaseVertexLocation;
+
+		// Обновляем мировую трансформацию тайла
+		XMMATRIX translation = XMMatrixTranslation(tile->worldPos.x, tile->worldPos.y, tile->worldPos.z);
+		XMStoreFloat4x4(&renderItem->World, translation);
+
+		tile->rItemIndex = static_cast<int>(mAllRitems.size()) + a;
+		mAllRitems.push_back(std::move(renderItem));
+	}
+
+	BuildFrameResources();
+
+	for (auto& e : mAllRitems)
+	{
+		if (e->Name.find("TILE") != std::string::npos)
+		{
+			continue;
+		}
 		mOpaqueRitems.push_back(e.get());
 	}
 }
