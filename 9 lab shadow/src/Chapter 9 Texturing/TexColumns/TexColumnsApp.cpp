@@ -27,6 +27,86 @@ bool f = true;
 
 // Lightweight structure stores parameters to draw a shape.  This will
 // vary from app-to-app.
+
+struct LodLevel
+{
+	MeshGeometry* Geo = nullptr;
+	UINT IndexCount = 0;
+	UINT StartIndexLocation = 0;
+	int BaseVertexLocation = 0;
+	float SwitchDistance = 0.0f;
+	DirectX::BoundingBox Bounds;
+};
+
+struct Tile
+{
+	XMFLOAT3 worldPos;
+
+	int lodLevel;
+	int maxLodLevel;
+	float tileSize;
+	int tileIndex;
+
+	int rItemIndex;
+	int NumFramesDirty;
+	DirectX::BoundingBox Bounds;
+};
+
+
+struct Node
+{
+	Tile* tile;
+	int nodeDepth;
+	std::unique_ptr<Node> children[4];
+	Node* parent;
+	BoundingBox Bounds;          
+          
+	bool ShouldNodeSplit(const XMFLOAT3& cameraPos, float heightscale, int mapsize) const;
+};
+
+struct AABB
+{
+	XMFLOAT3 minPoint;
+	XMFLOAT3 maxPoint;
+	BoundingBox aabb;
+	bool IntersectsFrustum(const XMFLOAT4 frustumPlanes[6]) const;
+};
+
+
+class Terrain
+{
+public:
+	Terrain() {};
+
+	void InitializeTerrain(ID3D12Device* device, int HeightMapIndex,
+		float worldSize, int maxLOD);
+	void UpdateTerrain(const XMFLOAT3& cameraPos, BoundingFrustum& frustum);
+	std::vector<std::shared_ptr<Tile>>& GetAllTiles();
+	void GetVisibleTiles(std::vector<Tile*>& outTiles);
+	float mWorldSize;
+	int mHmapIndex;
+	int renderlodlevel = 0;
+	int tileRenderIndex = 0;
+	std::unique_ptr<Node> mRootNode;
+
+
+
+	void BuildQuadTree(Node* node, int x, int y, int size, int depth);
+	BoundingBox CalculateTileAABB(const XMFLOAT3& pos, float size, float minHeight, float maxHeight);
+
+
+private:
+
+	ComPtr<ID3D12Resource> mHeightmapTexture;
+	std::vector<std::shared_ptr<Tile>>mAllTiles;
+	std::vector<Tile*> mVisibleTiles;
+	int LodLevel;
+	int maxLodLevel;
+	int tileIndex = 0;
+	
+};
+
+
 struct RenderItem
 {
 	RenderItem() = default;
@@ -124,6 +204,8 @@ private:
 
 	void CreateSpotLight(XMFLOAT3 pos, XMFLOAT3 rot, XMFLOAT3 color, float faloff_start, float faloff_end, float strength, float spotpower);
 	void CreatePointLight(XMFLOAT3 pos, XMFLOAT3 color, float faloff_start, float faloff_end,float strength);
+
+
 
 private:
 	std::unordered_map<std::string, unsigned int>ObjectsMeshCount;
