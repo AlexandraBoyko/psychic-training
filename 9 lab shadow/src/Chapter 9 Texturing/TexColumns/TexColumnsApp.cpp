@@ -50,6 +50,7 @@ struct Tile
 	int rItemIndex;
 	int NumFramesDirty;
 	DirectX::BoundingBox Bounds;
+	bool isVisible;
 };
 
 
@@ -80,7 +81,6 @@ public:
 
 	void InitializeTerrain(ID3D12Device* device, int HeightMapIndex,
 		float worldSize, int maxLOD);
-	void UpdateTerrain(const XMFLOAT3& cameraPos, BoundingFrustum& frustum);
 	std::vector<std::shared_ptr<Tile>>& GetAllTiles();
 	void GetVisibleTiles(std::vector<Tile*>& outTiles);
 	float mWorldSize;
@@ -106,6 +106,61 @@ private:
 	
 };
 
+
+void Terrain::InitializeTerrain(ID3D12Device* device, int HeightMapIndex,
+	float worldSize, int inMaxLodLevel)
+{
+	mWorldSize = worldSize;
+	maxLodLevel = inMaxLodLevel;
+	mRootNode = std::make_unique<Node>();
+	mRootNode->nodeDepth = 0;
+
+
+	int initialSize = (int)worldSize;
+	BuildQuadTree(mRootNode.get(), 0, 0, initialSize, 0);
+}
+
+
+void Terrain::BuildQuadTree(Node* node, int x, int y, int size, int depth)
+{
+	node->nodeDepth = depth;
+
+	float tileSize = mWorldSize / (1 << depth);
+
+	node->Bounds = CalculateTileAABB(XMFLOAT3((float)x, 0, (float)y), tileSize, -10.0f, 400.0f);
+
+	auto tile = std::make_unique<Tile>();
+	tile->worldPos = XMFLOAT3((float)x, 0, (float)y);
+	tile->lodLevel = depth;
+	tile->isVisible = true;
+	tile->tileSize = tileSize;
+	tile->Bounds = node->Bounds;
+	tile->tileIndex = tileIndex++;
+	mAllTiles.push_back(std::move(tile));
+	node->tile = mAllTiles.back().get();
+	if (depth != maxLodLevel)
+	{
+		int halfSize = size / 2;
+		for (int i = 0; i < 4; i++)
+		{
+			node->children[i] = std::make_unique<Node>();
+			int childX = x + (i % 2) * halfSize;
+			int childY = y + (i / 2) * halfSize;
+			BuildQuadTree(node->children[i].get(), childX, childY, halfSize, depth + 1);
+		}
+	}
+}
+
+BoundingBox Terrain::CalculateTileAABB(const XMFLOAT3& pos, float size, float minHeight, float maxHeight)
+{
+	BoundingBox aabb;
+	auto minPoint = XMFLOAT3(pos.x, 0, pos.z);
+	auto maxPoint = XMFLOAT3(pos.x + size, 100, pos.z + size);
+	XMVECTOR pt1 = XMLoadFloat3(&minPoint);
+	XMVECTOR pt2 = XMLoadFloat3(&maxPoint);
+	BoundingBox::CreateFromPoints(aabb, pt1, pt2);
+	return aabb;
+}
 
 struct RenderItem
 {
@@ -249,6 +304,12 @@ private:
 
     POINT mLastMousePos;
 
+	//
+	std::unique_ptr<Terrain> mTerrain;
+	std::vector<Tile*> m_visibleTerrainTiles;
+	float heightScale = 100;
+
+
 	// G-Buffer ресурсы
 	ComPtr<ID3D12Resource> mGBufferPosition;
 	ComPtr<ID3D12Resource> mGBufferNormal;
@@ -376,6 +437,9 @@ bool TexColumnsApp::Initialize()
 	BuildLights();
 	BuildShadowMapViews();
 	BuildDescriptorHeaps();
+	//TERRAIN STUFF
+	mTerrain = std::make_unique<Terrain>();
+	mTerrain->InitializeTerrain(md3dDevice.Get(), TexOffsets["textures/terr_height"], 1024, 6);
     BuildShapeGeometry();
 	SetLightShapes();
     BuildShadersAndInputLayout();
