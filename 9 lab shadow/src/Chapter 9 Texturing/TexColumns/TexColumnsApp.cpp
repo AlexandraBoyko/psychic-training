@@ -62,7 +62,8 @@ struct Node
 	Node* parent;
 	BoundingBox Bounds;          
           
-	bool ShouldNodeSplit(const XMFLOAT3& cameraPos, float heightscale, int mapsize) const;
+	bool ShouldSplitTree(const XMFLOAT3& cameraPos, float heightscale, int mapsize) const;
+	void UpdateTreeVisibility(BoundingFrustum& frustum, const XMFLOAT3& cameraPos, std::vector<Tile*>& visibleTiles, float heightscale, int mapsize);
 };
 
 struct AABB
@@ -85,6 +86,7 @@ public:
 	void GetVisibleTiles(std::vector<Tile*>& outTiles);
 	float mWorldSize;
 	int mHmapIndex;
+	int mHeightScale;
 	int renderlodlevel = 0;
 	int tileRenderIndex = 0;
 	std::unique_ptr<Node> mRootNode;
@@ -93,19 +95,36 @@ public:
 
 	void BuildQuadTree(Node* node, int x, int y, int size, int depth);
 	BoundingBox CalculateTileAABB(const XMFLOAT3& pos, float size, float minHeight, float maxHeight);
+	void Update(const XMFLOAT3& cameraPos, BoundingFrustum& frustum);
 
 
 private:
 
 	ComPtr<ID3D12Resource> mHeightmapTexture;
-	std::vector<std::shared_ptr<Tile>>mAllTiles;
-	std::vector<Tile*> mVisibleTiles;
 	int LodLevel;
 	int maxLodLevel;
 	int tileIndex = 0;
+
+	std::vector<std::shared_ptr<Tile>>mAllTiles;
+	std::vector<Tile*> mVisibleTiles;
 	
 };
 
+void Terrain::Update(const XMFLOAT3& cameraPos, BoundingFrustum& frustum)
+{
+	mVisibleTiles.clear();
+	if (mRootNode)
+	{
+		mRootNode->UpdateTreeVisibility(frustum, cameraPos, mVisibleTiles, mHeightScale, (int)mWorldSize);
+	}
+}
+
+void Terrain::GetVisibleTiles(std::vector<Tile*>& outTiles)
+{
+	outTiles = mVisibleTiles;
+
+
+}
 
 void Terrain::InitializeTerrain(ID3D12Device* device, int HeightMapIndex,
 	float worldSize, int inMaxLodLevel)
@@ -149,6 +168,51 @@ void Terrain::BuildQuadTree(Node* node, int x, int y, int size, int depth)
 			BuildQuadTree(node->children[i].get(), childX, childY, halfSize, depth + 1);
 		}
 	}
+}
+
+
+void Node::UpdateTreeVisibility(BoundingFrustum& frustum, const XMFLOAT3& cameraPos, std::vector<Tile*>& visibleTiles, float heightscale, int mapsize)
+{
+	if (frustum.Contains(Bounds) == DISJOINT)
+	{
+		return;
+	}
+
+	if (!children[0] || !ShouldSplitTree(cameraPos, heightscale, mapsize))
+	{
+		
+		if (tile)
+		{
+			visibleTiles.push_back(tile);
+		}
+	}
+	else
+	{
+		
+		for (int i = 0; i < 4; i++)
+		{
+			if (children[i])
+			{
+				children[i]->UpdateTreeVisibility(frustum, cameraPos, visibleTiles, heightscale, mapsize);
+			}
+		}
+	}
+}
+
+bool Node::ShouldSplitTree(const XMFLOAT3& cameraPos, float heightscale, int mapsize) const
+{
+	auto camPos = cameraPos;
+	camPos.y = 0;
+	XMVECTOR camPosVec = XMLoadFloat3(&camPos);
+	float lodneeddist = (mapsize / 2.0f - nodeDepth * mapsize / 16);
+	BoundingSphere sphere;
+	sphere.Center = cameraPos;
+	sphere.Radius = lodneeddist;
+	if (sphere.Intersects(Bounds))
+	{
+		return true;
+	}
+	return false;
 }
 
 BoundingBox Terrain::CalculateTileAABB(const XMFLOAT3& pos, float size, float minHeight, float maxHeight)
@@ -267,6 +331,7 @@ private:
 	void BuildTerrainRootSignature();
 	void DrawTileRenderItems(ID3D12GraphicsCommandList* cmdList, std::vector<Tile*> tiles, int HeightIndex);
 	void UpdateTerrainCBs(const GameTimer& gt);
+	void UpdateTerrain(const GameTimer& gt);
 
 
 private:
@@ -2095,14 +2160,14 @@ void TexColumnsApp::RenderCustomMesh(std::string unique_name, std::string meshna
 void TexColumnsApp::BuildRenderItems()
 {
 
-	RenderCustomMesh("building", "sponza", "", XMFLOAT3(0.07, 0.07, 0.07), XMFLOAT3(0, 3.14 / 2, 0), XMFLOAT3(0, 0, 0));
-	RenderCustomMesh("nigga", "negr", "NiggaMat", XMFLOAT3(3, 3, 3), XMFLOAT3(0, 3.14, 0), XMFLOAT3(0, 3, 0));
+	//RenderCustomMesh("building", "sponza", "", XMFLOAT3(0.07, 0.07, 0.07), XMFLOAT3(0, 3.14 / 2, 0), XMFLOAT3(0, 0, 0));
+	/*RenderCustomMesh("nigga", "negr", "NiggaMat", XMFLOAT3(3, 3, 3), XMFLOAT3(0, 3.14, 0), XMFLOAT3(0, 3, 0));
 	RenderCustomMesh("nigga2", "negr", "NiggaMat", XMFLOAT3(3, 3, 3), XMFLOAT3(0, 3.14, 0), XMFLOAT3(5, 3, 0));
 	BuildFrameResources();
 	for (auto& e : mAllRitems)
 	{
 		mOpaqueRitems.push_back(e.get());
-	}
+	}*/
 
 	std::vector<std::shared_ptr<Tile>>& allTiles = mTerrain->GetAllTiles();
 	// Теперь, для каждого видимого тайла, создаем или обновляем его RenderItem.
@@ -2273,6 +2338,13 @@ void TexColumnsApp::DrawSceneToShadowMap()
 }
 void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 {
+	//Terrain Stuff
+	m_visibleTerrainTiles.clear();
+	mTerrain->GetVisibleTiles(m_visibleTerrainTiles);
+	std::cout << "Tiles total:" << mTerrain->GetAllTiles().size() << std::endl;
+	std::cout << "Visible tiles: " << m_visibleTerrainTiles.size() << std::endl;
+	//
+
 	auto cmdListAlloc = mCurrFrameResource->CmdListAlloc;
 	ThrowIfFailed(cmdListAlloc->Reset());
 	ThrowIfFailed(mCommandList->Reset(cmdListAlloc.Get(), nullptr));
@@ -2327,6 +2399,18 @@ void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 	mCommandList->SetGraphicsRootConstantBufferView(3, passCB->GetGPUVirtualAddress());
 
 	DrawRenderItems(mCommandList.Get(), mOpaqueRitems);
+
+	// ===============RENDERING TERRAIN=====================
+	if (!m_visibleTerrainTiles.empty())
+	{
+
+		
+		mCommandList->SetPipelineState(mPSOs["terrain"].Get());
+		mCommandList->SetGraphicsRootSignature(mTerrainRootSignature.Get());
+		mCommandList->SetGraphicsRootConstantBufferView(4, passCB->GetGPUVirtualAddress());
+		DrawTileRenderItems(mCommandList.Get(), m_visibleTerrainTiles, mTerrain->mHmapIndex);
+	}
+
 
 
 	D3D12_RESOURCE_BARRIER barrier[3] = {
@@ -2857,4 +2941,66 @@ void TexColumnsApp::BuildTerrainGeometry()
 	terrainGeo->IndexBufferByteSize = ibByteSize;
 
 	mGeometries[terrainGeo->Name] = std::move(terrainGeo);
+}
+
+void TexColumnsApp::UpdateTerrain(const GameTimer& gt)
+{
+	if (!mTerrain)
+		return;
+
+	// Обновляем позицию камеры
+	XMVECTOR camPos = cam.GetPosition();
+	XMFLOAT3 cameraPosition;
+	XMStoreFloat3(&cameraPosition, camPos);
+
+	// Извлекаем плоскости frustum
+	XMMATRIX view = XMLoadFloat4x4(&mView);
+	XMMATRIX proj = XMLoadFloat4x4(&mProj);
+	XMMATRIX viewProj = XMMatrixMultiply(view, proj);
+
+	// Обновляем terrain систему. Это заполняет m_visibleTiles
+	mTerrain->Update(cameraPosition, cam.GetFrustum());
+	mTerrain->mHeightScale = heightScale;
+
+
+}
+
+
+void TexColumnsApp::DrawTileRenderItems(ID3D12GraphicsCommandList* cmdList, std::vector<Tile*> tiles, int HeightIndex)
+{
+	UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+	UINT matCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(MaterialConstants));
+	UINT terrCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(TerrainConstants));
+
+	auto objectCB = mCurrFrameResource->ObjectCB->Resource();
+	auto matCB = mCurrFrameResource->MaterialCB->Resource();
+
+
+	for (auto& t : tiles)
+	{
+		auto ri = mAllRitems[t->rItemIndex].get();
+		cmdList->IASetVertexBuffers(0, 1, &ri->Geo->VertexBufferView());
+		cmdList->IASetIndexBuffer(&ri->Geo->IndexBufferView());
+		cmdList->IASetPrimitiveTopology(ri->PrimitiveType);
+
+		CD3DX12_GPU_DESCRIPTOR_HANDLE heightHandle(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+		heightHandle.Offset(HeightIndex, mCbvSrvDescriptorSize);
+		cmdList->SetGraphicsRootDescriptorTable(0, heightHandle);
+		CD3DX12_GPU_DESCRIPTOR_HANDLE diffuseHandle(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+		diffuseHandle.Offset(ri->Mat->DiffuseSrvHeapIndex, mCbvSrvDescriptorSize);
+		cmdList->SetGraphicsRootDescriptorTable(1, diffuseHandle);
+		CD3DX12_GPU_DESCRIPTOR_HANDLE normalHandle(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+		normalHandle.Offset(ri->Mat->NormalSrvHeapIndex, mCbvSrvDescriptorSize);
+		cmdList->SetGraphicsRootDescriptorTable(2, normalHandle);
+
+		D3D12_GPU_VIRTUAL_ADDRESS objCBAddress = objectCB->GetGPUVirtualAddress() + ri->ObjCBIndex * objCBByteSize;
+		D3D12_GPU_VIRTUAL_ADDRESS matCBAddress = matCB->GetGPUVirtualAddress() + ri->Mat->MatCBIndex * matCBByteSize;
+
+		cmdList->SetGraphicsRootConstantBufferView(3, objCBAddress);
+		cmdList->SetGraphicsRootConstantBufferView(5, matCBAddress);
+		auto terrCB = mCurrFrameResource->TerrainCB->Resource();
+		mCommandList->SetGraphicsRootConstantBufferView(6, terrCB->GetGPUVirtualAddress() + t->tileIndex * terrCBByteSize);
+		cmdList->DrawIndexedInstanced(ri->IndexCount, 1, ri->StartIndexLocation, ri->BaseVertexLocation, 0);
+	}
+
 }

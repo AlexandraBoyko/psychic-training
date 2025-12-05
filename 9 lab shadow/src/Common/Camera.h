@@ -79,7 +79,9 @@ public:
 	void SpeedDown();
 	// After modifying camera position/orientation, call to rebuild the view matrix.
 	void UpdateViewMatrix();
-
+	void UpdateFrustum();
+	DirectX::BoundingFrustum GetFrustum() const;
+	DirectX::BoundingFrustum mFrustum;
 private:
 
 	// Camera coordinate system with coordinates relative to world space.
