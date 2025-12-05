@@ -23,7 +23,7 @@ using namespace DirectX::PackedVector;
 #pragma comment(lib, "D3D12.lib")
 
 const int gNumFrameResources = 3;
-bool f = true;
+bool f = false;
 
 // Lightweight structure stores parameters to draw a shape.  This will
 // vary from app-to-app.
@@ -85,7 +85,7 @@ public:
 	std::vector<std::shared_ptr<Tile>>& GetAllTiles();
 	void GetVisibleTiles(std::vector<Tile*>& outTiles);
 	float mWorldSize;
-	int mHmapIndex;
+	int mHmapIndex = 0;
 	int mHeightScale;
 	int renderlodlevel = 0;
 	int tileRenderIndex = 0;
@@ -131,6 +131,8 @@ void Terrain::InitializeTerrain(ID3D12Device* device, int HeightMapIndex,
 {
 	mWorldSize = worldSize;
 	maxLodLevel = inMaxLodLevel;
+	mHmapIndex = HeightMapIndex;
+
 	mRootNode = std::make_unique<Node>();
 	mRootNode->nodeDepth = 0;
 
@@ -2079,7 +2081,7 @@ void TexColumnsApp::BuildPSOs()
 	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&pso,
 		IID_PPV_ARGS(&mPSOs["shadowDebug"])));
 
-	// PSO for terrain
+	// Terrain PSO 
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC terrainPsoDesc = {};
 	terrainPsoDesc.InputLayout = { mInputLayout.data(), (UINT)mInputLayout.size() };
 	terrainPsoDesc.pRootSignature = mTerrainRootSignature.Get();
@@ -2374,7 +2376,12 @@ void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 	mTerrain->GetVisibleTiles(m_visibleTerrainTiles);
 	std::cout << "Tiles total:" << mTerrain->GetAllTiles().size() << std::endl;
 	std::cout << "Visible tiles: " << m_visibleTerrainTiles.size() << std::endl;
+	std::cout << "HeightIndex: " << mTerrain->mHmapIndex << std::endl;
 	//
+	for (auto t : m_visibleTerrainTiles)
+	{
+		std::cout << t->tileIndex << " Pos: " << t->worldPos.x << "," << t->worldPos.y <<  "," << t->worldPos.z << " LOD: " << t->lodLevel << std::endl; 
+	}
 
 	auto cmdListAlloc = mCurrFrameResource->CmdListAlloc;
 	ThrowIfFailed(cmdListAlloc->Reset());
@@ -3003,6 +3010,8 @@ void TexColumnsApp::UpdateTerrain(const GameTimer& gt)
 
 void TexColumnsApp::DrawTileRenderItems(ID3D12GraphicsCommandList* cmdList, std::vector<Tile*> tiles, int HeightIndex)
 {
+
+
 	UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
 	UINT matCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(MaterialConstants));
 	UINT terrCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(TerrainConstants));
@@ -3013,7 +3022,14 @@ void TexColumnsApp::DrawTileRenderItems(ID3D12GraphicsCommandList* cmdList, std:
 
 	for (auto& t : tiles)
 	{
+		
+		if (t->rItemIndex < 0 || t->rItemIndex >= mAllRitems.size())
+		{
+			std::cout << "Invalid rItemIndex for tile: " << t->tileIndex << std::endl;
+			continue;
+		}
 		auto ri = mAllRitems[t->rItemIndex].get();
+
 		cmdList->IASetVertexBuffers(0, 1, &ri->Geo->VertexBufferView());
 		cmdList->IASetIndexBuffer(&ri->Geo->IndexBufferView());
 		cmdList->IASetPrimitiveTopology(ri->PrimitiveType);
