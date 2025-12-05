@@ -282,6 +282,8 @@ private:
     ComPtr<ID3D12RootSignature> mRootSignature = nullptr;
     ComPtr<ID3D12RootSignature> mLightingRootSignature = nullptr;
 	ComPtr<ID3D12RootSignature> mShadowPassRootSignature = nullptr;
+	ComPtr<ID3D12RootSignature> mTerrainRootSignature = nullptr;
+
 
 	ComPtr<ID3D12DescriptorHeap> mSrvDescriptorHeap = nullptr;
 	ComPtr<ID3D12DescriptorHeap> m_ImGuiSrvDescriptorHeap; // Member variable
@@ -441,6 +443,8 @@ bool TexColumnsApp::Initialize()
     BuildRootSignature();
     BuildLightingRootSignature();
 	BuildShadowPassRootSignature();
+	// TERRAIN HERE
+	BuildTerrainRootSignature();
 	BuildLights();
 	BuildShadowMapViews();
 	BuildDescriptorHeaps();
@@ -902,6 +906,23 @@ void TexColumnsApp::UpdateMainPassCB(const GameTimer& gt)
 	currPassCB->CopyData(0, mMainPassCB);
 }
 
+
+void  TexColumnsApp::UpdateTerrainCBs(const GameTimer& gt)
+{
+	auto currTileCB = mCurrFrameResource->TerrainCB.get();
+	for (auto& t : mTerrain->GetAllTiles())
+	{
+		TerrainConstants tConstants;
+		tConstants.TilePosition = t->worldPos;
+		tConstants.TileSize = t->tileSize;
+		tConstants.mapSize = mTerrain->mWorldSize;
+		tConstants.hScale = heightScale;
+		currTileCB->CopyData(t->tileIndex, tConstants);
+
+		t->NumFramesDirty--;
+	}
+}
+
 void TexColumnsApp::CreateGBuffer()
 {
 	// Форматы
@@ -1068,6 +1089,55 @@ void TexColumnsApp::BuildRootSignature()
         serializedRootSig->GetBufferPointer(),
         serializedRootSig->GetBufferSize(),
         IID_PPV_ARGS(mRootSignature.GetAddressOf())));
+}
+void TexColumnsApp::BuildTerrainRootSignature()
+{
+	CD3DX12_DESCRIPTOR_RANGE heightRange;
+	heightRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // Диффузная текстура в регистре t0
+
+	CD3DX12_DESCRIPTOR_RANGE diffuseRange;
+	diffuseRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1); // Диффузная текстура в регистре t0
+
+	CD3DX12_DESCRIPTOR_RANGE normalRange;
+	normalRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 2);  // Нормальная карта в регистре t1
+
+	// Root parameter can be a table, root descriptor or root constants.
+	CD3DX12_ROOT_PARAMETER slotRootParameter[7];
+
+	// Perfomance TIP: Order from most frequent to least frequent.
+	slotRootParameter[0].InitAsDescriptorTable(1, &heightRange, D3D12_SHADER_VISIBILITY_ALL);
+	slotRootParameter[1].InitAsDescriptorTable(1, &diffuseRange, D3D12_SHADER_VISIBILITY_ALL);
+	slotRootParameter[2].InitAsDescriptorTable(1, &normalRange, D3D12_SHADER_VISIBILITY_ALL);
+
+	slotRootParameter[3].InitAsConstantBufferView(0); // register b0
+	slotRootParameter[4].InitAsConstantBufferView(1); // register b1
+	slotRootParameter[5].InitAsConstantBufferView(2); // register b2
+	slotRootParameter[6].InitAsConstantBufferView(3); // register b3
+
+	auto staticSamplers = GetStaticSamplers();
+
+	// A root signature is an array of root parameters.
+	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(7, slotRootParameter,
+		(UINT)staticSamplers.size(), staticSamplers.data(),
+		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+	// create a root signature with a single slot which points to a descriptor range consisting of a single constant buffer
+	ComPtr<ID3DBlob> serializedRootSig = nullptr;
+	ComPtr<ID3DBlob> errorBlob = nullptr;
+	HRESULT hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
+		serializedRootSig.GetAddressOf(), errorBlob.GetAddressOf());
+
+	if (errorBlob != nullptr)
+	{
+		::OutputDebugStringA((char*)errorBlob->GetBufferPointer());
+	}
+	ThrowIfFailed(hr);
+
+	ThrowIfFailed(md3dDevice->CreateRootSignature(
+		0,
+		serializedRootSig->GetBufferPointer(),
+		serializedRootSig->GetBufferSize(),
+		IID_PPV_ARGS(mTerrainRootSignature.GetAddressOf())));
 }
 
 // build lighting root signature 
