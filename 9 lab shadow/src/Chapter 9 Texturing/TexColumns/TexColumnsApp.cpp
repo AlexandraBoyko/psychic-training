@@ -1487,6 +1487,9 @@ void TexColumnsApp::BuildShadersAndInputLayout()
 	mShaders["shadowVS"] = d3dUtil::CompileShader(L"Shaders\\ShadowMap.hlsl", nullptr, "VS", "vs_5_1");
 	mShaders["lightingQUADVS"] = d3dUtil::CompileShader(L"Shaders\\LightingPass.hlsl", nullptr, "VS_QUAD", "vs_5_1");
 	mShaders["shadowDebugPS"] = d3dUtil::CompileShader(L"Shaders\\LightingPass.hlsl", nullptr, "PS_ShadowDebug", "ps_5_1");
+	mShaders["terrainVS"] = d3dUtil::CompileShader(L"Shaders\\TerrainShader.hlsl", nullptr, "VS", "vs_5_1");
+	mShaders["terrainPS"] = d3dUtil::CompileShader(L"Shaders\\TerrainShader.hlsl", nullptr, "PS", "ps_5_0");
+
 
     mInputLayout =
     {
