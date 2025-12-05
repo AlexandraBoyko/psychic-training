@@ -602,6 +602,7 @@ void TexColumnsApp::Update(const GameTimer& gt)
 		CloseHandle(eventHandle);
 	}
 	UpdateCamera(gt);
+	UpdateTerrain(gt);
 	// === ImGui Setup ===
 	ImGui_ImplDX12_NewFrame();
 	ImGui_ImplWin32_NewFrame();
@@ -612,6 +613,7 @@ void TexColumnsApp::Update(const GameTimer& gt)
 	UpdateObjectCBs(gt);
 	UpdateMaterialCBs(gt);
 	UpdateLightCBs(gt);
+	UpdateTerrainCBs(gt);
 	UpdateMainPassCB(gt);
 	ImGui::End();
 }
@@ -2077,7 +2079,36 @@ void TexColumnsApp::BuildPSOs()
 	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&pso,
 		IID_PPV_ARGS(&mPSOs["shadowDebug"])));
 
+	// PSO for terrain
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC terrainPsoDesc = {};
+	terrainPsoDesc.InputLayout = { mInputLayout.data(), (UINT)mInputLayout.size() };
+	terrainPsoDesc.pRootSignature = mTerrainRootSignature.Get();
+	terrainPsoDesc.VS =
+	{
+		reinterpret_cast<BYTE*>(mShaders["terrainVS"]->GetBufferPointer()),
+		mShaders["terrainVS"]->GetBufferSize()
+	};
+	terrainPsoDesc.PS =
+	{
+		reinterpret_cast<BYTE*>(mShaders["terrainPS"]->GetBufferPointer()),
+		mShaders["terrainPS"]->GetBufferSize()
+	};
+	terrainPsoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	terrainPsoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
 
+	terrainPsoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	terrainPsoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+	terrainPsoDesc.SampleMask = UINT_MAX;
+	terrainPsoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	terrainPsoDesc.NumRenderTargets = 3; // G-Buffer
+	terrainPsoDesc.RTVFormats[0] = albedoFormat;
+	terrainPsoDesc.RTVFormats[1] = normalFormat;
+	terrainPsoDesc.RTVFormats[2] = positionFormat;
+	terrainPsoDesc.SampleDesc.Count = m4xMsaaState ? 4 : 1;
+	terrainPsoDesc.SampleDesc.Quality = m4xMsaaState ? (m4xMsaaQuality - 1) : 0;
+	terrainPsoDesc.DSVFormat = mDepthStencilFormat;
+
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&terrainPsoDesc, IID_PPV_ARGS(&mPSOs["terrain"])));
 }
 
 void TexColumnsApp::BuildFrameResources()
@@ -2404,7 +2435,11 @@ void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 	if (!m_visibleTerrainTiles.empty())
 	{
 
-		
+		if (!mPSOs["terrain"])
+		{
+			OutputDebugStringA("Terrain PSO не создан!\n");
+		}
+
 		mCommandList->SetPipelineState(mPSOs["terrain"].Get());
 		mCommandList->SetGraphicsRootSignature(mTerrainRootSignature.Get());
 		mCommandList->SetGraphicsRootConstantBufferView(4, passCB->GetGPUVirtualAddress());
