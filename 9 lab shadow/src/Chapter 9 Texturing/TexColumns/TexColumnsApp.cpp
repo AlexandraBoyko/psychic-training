@@ -262,10 +262,11 @@ private:
 
 	///
 
-	void TexColumnsApp::GenerateTileGeometry(const XMFLOAT3& worldPos, float tileSize, int lodLevel,
-		std::vector<Vertex>& vertices, std::vector<std::uint32_t>& indices);
-	void TexColumnsApp::BuildTerrainGeometry();
-
+	void GenerateTileGeometry(const XMFLOAT3& worldPos, float tileSize, int lodLevel, std::vector<Vertex>& vertices, std::vector<std::uint32_t>& indices);
+	void BuildTerrainGeometry();
+	void BuildTerrainRootSignature();
+	void DrawTileRenderItems(ID3D12GraphicsCommandList* cmdList, std::vector<Tile*> tiles, int HeightIndex);
+	void UpdateTerrainCBs(const GameTimer& gt);
 
 
 private:
