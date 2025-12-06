@@ -165,7 +165,7 @@ void Terrain::BuildQuadTree(Node* node, int x, int y, int size, int depth)
 	node->tile = mAllTiles.back().get();
 	if (depth != maxLodLevel)
 	{
-		int halfSize = size / 2;
+		int halfSize = tileSize / 2;
 		for (int i = 0; i < 4; i++)
 		{
 			node->children[i] = std::make_unique<Node>();
@@ -2798,7 +2798,7 @@ void TexColumnsApp::GenerateTileGeometry(const XMFLOAT3& worldPos, float tileSiz
 		for (int x = 0; x < resolution; x++)
 		{
 			Vertex vertex;
-			vertex.Pos = XMFLOAT3(worldPos.x + x * stepSize, 0.0f, worldPos.z + z * stepSize);
+			vertex.Pos = XMFLOAT3(x * stepSize, 0.0f, z * stepSize);
 			vertex.TexC = XMFLOAT2((float)x / (resolution - 1), (float)z / (resolution - 1));
 			vertex.Normal = XMFLOAT3(0.0f, 1.0f, 0.0f);
 			vertex.Tangent = XMFLOAT3(1.0f, 0.0f, 0.0f);
@@ -2946,6 +2946,8 @@ void TexColumnsApp::BuildTerrainGeometry()
 	
 	std::vector<Vertex> allVertices;
 	std::vector<std::uint32_t> allIndices;
+
+	
 
 	for (int tileIdx = 0; tileIdx < allTiles.size(); tileIdx++)
 	{
