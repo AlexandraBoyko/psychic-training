@@ -225,7 +225,7 @@ BoundingBox Terrain::CalculateTileAABB(const XMFLOAT3& pos, float size, float mi
 {
 	BoundingBox aabb;
 	auto minPoint = XMFLOAT3(pos.x, 0, pos.z);
-	auto maxPoint = XMFLOAT3(pos.x + size, 100, pos.z + size);
+	auto maxPoint = XMFLOAT3(pos.x + size, 1000, pos.z + size);
 	XMVECTOR pt1 = XMLoadFloat3(&minPoint);
 	XMVECTOR pt2 = XMLoadFloat3(&maxPoint);
 	BoundingBox::CreateFromPoints(aabb, pt1, pt2);
@@ -2310,7 +2310,7 @@ void TexColumnsApp::Draw(const GameTimer& gt)
 	// Add the command list to the queue for execution.
 	ID3D12CommandList* cmdsLists[] = { mCommandList.Get() };
 	mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
-	DrawShadowDebug(mCommandList.Get(), 256);
+	//DrawShadowDebug(mCommandList.Get(), 256);
 
 	// Swap the back and front buffers
 	ThrowIfFailed(mSwapChain->Present(1, 0));
@@ -2581,7 +2581,7 @@ void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 
 
 
-	DrawShadowDebug(mCommandList.Get(), 256);
+	//DrawShadowDebug(mCommandList.Get(), 256);
 
 
 
