@@ -278,6 +278,7 @@ void Camera::YawPitch(float yawDelta, float pitchDelta)
 	XMVECTOR newUp = XMVector3Normalize(XMVector3Cross(newForward, newRight));
 	XMStoreFloat3(&mUp, newUp);
 
+	mViewDirty = true;
 	// 6. Обновляем матрицу вида.
 	UpdateViewMatrix();
 }

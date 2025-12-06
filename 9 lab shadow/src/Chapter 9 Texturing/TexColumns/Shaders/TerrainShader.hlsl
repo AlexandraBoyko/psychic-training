@@ -84,9 +84,9 @@ static const float NORMAL_SAMPLE_OFFSET = 0.01f;
 VertexOut VS(VertexIn vin)
 {
     VertexOut vout = (VertexOut) 0.0f;
-        float4 texC = mul(float4(vin.TexC, 0.0f, 1.0f), gTexTransform);
+     float4 texC = mul(float4(vin.TexC, 0.0f, 1.0f), gTexTransform);
     vout.TexC = mul(texC, gMatTransform).xy;
-    float coeff = gTileSize / mapSize;
+    float coeff = gTileSize / mapSize ;
     vout.TexC *= coeff;
     vout.TexC += gTilePosition.xz / mapSize;
     vout.TexCl = vin.TexC;

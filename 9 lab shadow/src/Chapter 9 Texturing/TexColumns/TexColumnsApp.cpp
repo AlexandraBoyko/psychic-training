@@ -121,7 +121,11 @@ void Terrain::Update(const XMFLOAT3& cameraPos, BoundingFrustum& frustum)
 
 void Terrain::GetVisibleTiles(std::vector<Tile*>& outTiles)
 {
+
+	//for (auto& t : mAllTiles)
+	//	mVisibleTiles.push_back(t.get());
 	outTiles = mVisibleTiles;
+
 
 
 }
@@ -517,7 +521,7 @@ bool TexColumnsApp::Initialize()
 	BuildDescriptorHeaps();
 	//TERRAIN STUFF
 	mTerrain = std::make_unique<Terrain>();
-	mTerrain->InitializeTerrain(md3dDevice.Get(), TexOffsets["textures/terr_height"], 1024, 6);
+	mTerrain->InitializeTerrain(md3dDevice.Get(), TexOffsets["textures/terr_height"], 512, 6);
 	BuildTerrainGeometry();
     BuildShapeGeometry();
 	SetLightShapes();
@@ -900,10 +904,10 @@ void TexColumnsApp::UpdateLightCBs(const GameTimer& gt)
 
 			// Define the orthographic projection volume
 			// These values depend heavily on your scene size.
-			float viewWidth = 600.0f; // Adjust to fit your scene
-			float viewHeight = 600.0f;
+			float viewWidth = 1024.0f; // Adjust to fit your scene
+			float viewHeight = 1024.0f;
 			float nearZ = 1.0f;
-			float farZ = 1000.0f; // Adjust
+			float farZ = 10000.0f; // Adjust
 			XMMATRIX lightProj = XMMatrixIdentity();
 			if (l.type == 2)
 				lightProj = XMMatrixOrthographicLH(viewWidth, viewHeight, nearZ, farZ);
@@ -968,7 +972,7 @@ void TexColumnsApp::UpdateMainPassCB(const GameTimer& gt)
 	mMainPassCB.InvRenderTargetSize = XMFLOAT2(1.0f / mClientWidth, 1.0f / mClientHeight);
 	//mMainPassCB.AmbientLight = { 0.0f, 1.0f, 0.0f, 1.0f };
 	mMainPassCB.NearZ = 1.0f;
-	mMainPassCB.FarZ = 1000.0f;
+	mMainPassCB.FarZ = 20000.0f;
 	mMainPassCB.TotalTime = gt.TotalTime();
 	mMainPassCB.DeltaTime = gt.DeltaTime();
 	auto currPassCB = mCurrFrameResource->PassCB.get();
@@ -979,6 +983,7 @@ void TexColumnsApp::UpdateMainPassCB(const GameTimer& gt)
 void  TexColumnsApp::UpdateTerrainCBs(const GameTimer& gt)
 {
 	auto currTileCB = mCurrFrameResource->TerrainCB.get();
+
 	for (auto& t : mTerrain->GetAllTiles())
 	{
 		TerrainConstants tConstants;
@@ -2205,6 +2210,17 @@ void TexColumnsApp::BuildRenderItems()
 	std::vector<std::shared_ptr<Tile>>& allTiles = mTerrain->GetAllTiles();
 	// Теперь, для каждого видимого тайла, создаем или обновляем его RenderItem.
 	int a = 0;
+	for (int i = 0; i < 10 && i < allTiles.size(); i++)
+	{
+		auto& t = allTiles[i];
+		std::cout
+			<< "Tile " << i
+			<< ": worldPos = (" << t->worldPos.x
+			<< ", " << t->worldPos.y
+			<< ", " << t->worldPos.z << ")"
+			<< ", tileSize = " << t->tileSize
+			<< std::endl;
+	}
 	for (auto& tile : allTiles)
 	{
 		auto renderItem = std::make_unique<RenderItem>();
@@ -2224,6 +2240,7 @@ void TexColumnsApp::BuildRenderItems()
 
 		// Обновляем мировую трансформацию тайла
 		XMMATRIX translation = XMMatrixTranslation(tile->worldPos.x, tile->worldPos.y, tile->worldPos.z);
+		//std::cout << tile->worldPos.x << "|" << tile->worldPos.y << "|" << tile->worldPos.z << std::endl;
 		XMStoreFloat4x4(&renderItem->World, translation);
 
 		tile->rItemIndex = static_cast<int>(mAllRitems.size()) + a;
@@ -2374,8 +2391,8 @@ void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 	//Terrain Stuff
 	m_visibleTerrainTiles.clear();
 	mTerrain->GetVisibleTiles(m_visibleTerrainTiles);
-	std::cout << "Tiles total:" << mTerrain->GetAllTiles().size() << std::endl;
-	std::cout << "Visible tiles: " << m_visibleTerrainTiles.size() << std::endl;
+	/*std::cout << "Tiles total:" << mTerrain->GetAllTiles().size() << std::endl;
+	std::cout << "Visible tiles: " << m_visibleTerrainTiles.size() << std::endl;*/
 	//std::cout << "HeightIndex: " << mTerrain->mHmapIndex << std::endl;
 	//
 	//for (auto t : m_visibleTerrainTiles)
@@ -2769,11 +2786,11 @@ void TexColumnsApp::GenerateTileGeometry(const XMFLOAT3& worldPos, float tileSiz
 	int baseResolution = 16;
 	float Factor = 1;
 	int resolution = static_cast<int>(baseResolution * std::pow(Factor, lodLevel));
-
+	//int resolution = (1 << (6 - lodLevel)) + 1;
 	vertices.clear();
 	indices.clear();
-
-	float stepSize = tileSize / (resolution - 1);
+	//float stepSize = tileSize;
+	float stepSize = tileSize / (resolution - 1 );
 	float skirtDepth = 10;
 
 	for (int z = 0; z < resolution; z++)
@@ -2939,7 +2956,7 @@ void TexColumnsApp::BuildTerrainGeometry()
 
 		GenerateTileGeometry(tile->worldPos, tile->tileSize, tile->lodLevel, tileVertices, tileIndices);
 
-	
+
 		UINT baseVertex = static_cast<int>(allVertices.size());
 		for (auto& index : tileIndices)
 		{
@@ -2951,6 +2968,7 @@ void TexColumnsApp::BuildTerrainGeometry()
 		submesh.IndexCount = (UINT)tileIndices.size();
 		submesh.StartIndexLocation = (UINT)allIndices.size();
 		submesh.BaseVertexLocation = 0;
+		//submesh.BaseVertexLocation = baseVertex;
 
 		std::string submeshName = "tile_" + std::to_string(tileIdx) + "_LOD_" + std::to_string(tile->lodLevel);
 		terrainGeo->DrawArgs[submeshName] = submesh;
@@ -2990,6 +3008,7 @@ void TexColumnsApp::UpdateTerrain(const GameTimer& gt)
 	if (!mTerrain)
 		return;
 
+
 	// Обновляем позицию камеры
 	XMVECTOR camPos = cam.GetPosition();
 	XMFLOAT3 cameraPosition;
@@ -3028,6 +3047,7 @@ void TexColumnsApp::DrawTileRenderItems(ID3D12GraphicsCommandList* cmdList, std:
 			std::cout << "Invalid rItemIndex for tile: " << t->tileIndex << std::endl;
 			continue;
 		}
+
 		auto ri = mAllRitems[t->rItemIndex].get();
 
 		cmdList->IASetVertexBuffers(0, 1, &ri->Geo->VertexBufferView());
