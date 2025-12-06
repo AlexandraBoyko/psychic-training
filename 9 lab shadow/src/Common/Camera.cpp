@@ -361,6 +361,7 @@ void Camera::UpdateViewMatrix()
 
 		mViewDirty = false;
 	}
+	UpdateFrustum();
 }
 
 DirectX::BoundingFrustum Camera::GetFrustum() const { return mFrustum; }

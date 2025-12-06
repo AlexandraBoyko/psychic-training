@@ -50,7 +50,7 @@ struct Tile
 	int rItemIndex;
 	int NumFramesDirty;
 	DirectX::BoundingBox Bounds;
-	bool isVisible;
+	bool isVisible = true;
 };
 
 
@@ -2376,12 +2376,12 @@ void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 	mTerrain->GetVisibleTiles(m_visibleTerrainTiles);
 	std::cout << "Tiles total:" << mTerrain->GetAllTiles().size() << std::endl;
 	std::cout << "Visible tiles: " << m_visibleTerrainTiles.size() << std::endl;
-	std::cout << "HeightIndex: " << mTerrain->mHmapIndex << std::endl;
+	//std::cout << "HeightIndex: " << mTerrain->mHmapIndex << std::endl;
 	//
-	for (auto t : m_visibleTerrainTiles)
-	{
-		std::cout << t->tileIndex << " Pos: " << t->worldPos.x << "," << t->worldPos.y <<  "," << t->worldPos.z << " LOD: " << t->lodLevel << std::endl; 
-	}
+	//for (auto t : m_visibleTerrainTiles)
+	//{
+	//	std::cout << t->tileIndex << " Pos: " << t->worldPos.x << "," << t->worldPos.y <<  "," << t->worldPos.z << " LOD: " << t->lodLevel << std::endl; 
+	//}
 
 	auto cmdListAlloc = mCurrFrameResource->CmdListAlloc;
 	ThrowIfFailed(cmdListAlloc->Reset());
