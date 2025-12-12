@@ -38,6 +38,10 @@ cbuffer cbTerrainTile : register(b3)
     float gTileSize;
     float mapSize;
     float heightScale;
+    
+    float2 gHitUV; // <--- ДОБАВЛЕНО
+    float gBrushRadius; // <--- ДОБАВЛЕНО
+    float gBrushActive;
 
 };
 // Texture resources
@@ -93,6 +97,34 @@ VertexOut VS(VertexIn vin)
 
     float height = gHeightMap.SampleLevel(gSamLinearClamp, vout.TexC, 0).r;
     
+        // ПРОБЛЕМА МОЖЕТ БЫТЬ ЗДЕСЬ!
+    if (gBrushActive != 0.0f)
+    {
+        float dist = distance(vout.TexC, gHitUV);
+        
+        if (dist < gBrushRadius)
+        {
+            float falloff = 1.0 - (dist / gBrushRadius);
+            falloff = falloff * falloff;
+            
+            // ВАЖНО: проверяем знак gBrushActive
+            if (gBrushActive > 0.0f)
+            {
+                // Поднимаем террейн
+                height += 0.1f * falloff;
+                // Отладочный вывод через цвет (можно убрать позже)
+                // В реальности нельзя выводить в консоль из шейдера,
+                // но можно визуализировать через цвет
+            }
+            else if (gBrushActive < 0.0f)
+            {
+                // Опускаем террейн
+                height -= 0.1f * falloff;
+            }
+            
+            height = clamp(height, 0.0, 1.0);
+        }
+    }
 
     float3 posL = vin.PosL;
     posL.y = posL.y + height * heightScale;
@@ -150,7 +182,40 @@ PixelOut PS(VertexOut pin) : SV_Target
 {
     PixelOut pout;
     
-
+    if (gBrushActive > 0.5f || gBrushActive < -0.5f)
+    {
+        float dist = distance(pin.TexC, gHitUV);
+        
+        if (dist < gBrushRadius)
+        {
+            float intensity = 1.0 - (dist / gBrushRadius);
+            
+            // Получаем оригинальный цвет текстуры
+            float4 diffuseAlbedo = gDiffuseMap.Sample(gSamAnisotropicWrap, pin.TexC);
+            diffuseAlbedo *= gDiffuseAlbedo;
+            
+            // Выбираем цвет кисти
+            float4 brushColor = float4(1, 0, 0, 0.5f); // Красный для поднятия
+            if (gBrushActive < -0.5f)
+                brushColor = float4(0, 0, 1, 0.5f); // Синий для опускания
+            
+            // Смешиваем с текстурой
+            diffuseAlbedo.rgb = lerp(diffuseAlbedo.rgb, brushColor.rgb, brushColor.a * intensity);
+            
+            pout.Albedo = diffuseAlbedo;
+            
+            // Нормали и позиция (используем оригинальные)
+            float3 normalMapSample = gNormalMap.Sample(gSamAnisotropicWrap, pin.TexC).rgb;
+            pin.NormalW = normalize(pin.NormalW);
+            pin.TangentW = normalize(pin.TangentW);
+            float3 bumpedNormalW = NormalSampleToWorldSpace(normalMapSample, pin.NormalW, pin.TangentW);
+            
+            pout.Normal = float4(bumpedNormalW, gRoughness);
+            pout.Position = float4(pin.PosW, 1.0f);
+            return pout;
+        }
+    }
+    
     float4 diffuseAlbedo = gDiffuseMap.Sample(gSamAnisotropicWrap, pin.TexC);
     diffuseAlbedo *= gDiffuseAlbedo;
     

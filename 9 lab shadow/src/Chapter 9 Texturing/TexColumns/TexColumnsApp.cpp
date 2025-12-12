@@ -92,11 +92,17 @@ public:
 	std::unique_ptr<Node> mRootNode;
 
 
+	std::vector<float> mHeightData;
+	int mHeightmapWidth = 0;
+	int mHeightmapHeight = 0;
 
 	void BuildQuadTree(Node* node, int x, int y, int size, int depth);
 	BoundingBox CalculateTileAABB(const XMFLOAT3& pos, float size, float minHeight, float maxHeight);
 	void Update(const XMFLOAT3& cameraPos, BoundingFrustum& frustum);
 
+
+	float GetWorldSize() const { return mWorldSize; };
+	float Terrain::SampleHeight(float u, float v);
 
 private:
 
@@ -339,6 +345,7 @@ private:
 	void UpdateTerrainCBs(const GameTimer& gt);
 	void UpdateTerrain(const GameTimer& gt);
 
+	bool TexColumnsApp::RaycastToTerrainUV(int sx, int sy, XMFLOAT2& uvOut, XMFLOAT3& hitWorld);
 
 private:
 	std::unordered_map<std::string, unsigned int>ObjectsMeshCount;
@@ -429,6 +436,10 @@ private:
 	const DXGI_FORMAT positionFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
 	const DXGI_FORMAT normalFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 	const DXGI_FORMAT albedoFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+	bool     mBrushActive = false;      // ЛКМ нажата?
+	XMFLOAT2 mBrushHitUV = { -1.0f, -1.0f }; // куда попали в UV
+	float    mBrushRadius = 0.02f;      // радиус кисти (в uv)
 
 };
 
@@ -619,24 +630,114 @@ void TexColumnsApp::Update(const GameTimer& gt)
 	UpdateObjectCBs(gt);
 	UpdateMaterialCBs(gt);
 	UpdateLightCBs(gt);
+
+	if (mBrushActive)
+	{
+		XMFLOAT2 uv;
+		XMFLOAT3 hit;
+		if (RaycastToTerrainUV(mLastMousePos.x, mLastMousePos.y, uv, hit))
+			mBrushHitUV = uv;
+	}
+
 	UpdateTerrainCBs(gt);
 	UpdateMainPassCB(gt);
 	ImGui::End();
 }
 
 
+bool TexColumnsApp::RaycastToTerrainUV(int sx, int sy, XMFLOAT2& uvOut, XMFLOAT3& hitWorld)
+{
+	// Матрицы камеры
+	XMMATRIX view = cam.GetView();
+	XMMATRIX proj = cam.GetProj();
+	XMMATRIX invView = XMMatrixInverse(nullptr, view);
+	XMMATRIX invProj = XMMatrixInverse(nullptr, proj);
+
+
+	float px = 2.0f * sx / mClientWidth - 1.0f;
+	float py = -2.0f * sy / mClientHeight + 1.0f;
+
+	XMVECTOR rayClip = XMVectorSet(px, py, 1.0f, 1.0f);
+
+
+	XMVECTOR rayView = XMVector3TransformCoord(rayClip, invProj);
+	rayView = XMVectorSetW(rayView, 0.0f);
+
+
+	XMVECTOR rayWorld = XMVector3Normalize(XMVector3TransformNormal(rayView, invView));
+	XMVECTOR camPos = cam.GetPosition();
+
+	// Плоскость террейна: y = 0
+	float camY = XMVectorGetY(camPos);
+	float rayY = XMVectorGetY(rayWorld);
+
+	// Если луч параллелен земле — пересечения нет
+	if (fabs(rayY) < 1e-6f)
+		return false;
+
+	// t — точка пересечения луча с y=0
+	float t = -camY / rayY;
+	if (t < 0.0f)
+		return false; // земля позади камеры
+
+	// hit point
+	XMVECTOR p = camPos + rayWorld * t;
+	XMStoreFloat3(&hitWorld, p);
+
+	// проверка внутри террейна
+	if (hitWorld.x < 0 || hitWorld.z < 0 ||
+		hitWorld.x > mTerrain->GetWorldSize() ||
+		hitWorld.z > mTerrain->GetWorldSize())
+		return false;
+
+	// UV координаты
+	uvOut.x = hitWorld.x / mTerrain->GetWorldSize();
+	uvOut.y = hitWorld.z / mTerrain->GetWorldSize();
+
+	return true;
+}
+
 
 
 void TexColumnsApp::OnMouseDown(WPARAM btnState, int x, int y)
 {
-    mLastMousePos.x = x;
-    mLastMousePos.y = y;
+    //mLastMousePos.x = x;
+    //mLastMousePos.y = y;
 
-    SetCapture(mhMainWnd);
+    //SetCapture(mhMainWnd);
+
+	SetCapture(mhMainWnd);
+
+	if (ImGui::GetIO().WantCaptureMouse)
+		return;
+
+	XMFLOAT2 uv;
+	XMFLOAT3 hit;
+	bool hitOK = RaycastToTerrainUV(x, y, uv, hit);
+	if (RaycastToTerrainUV(x, y, uv, hit))
+	{
+		mBrushActive = true;
+		mBrushHitUV = uv;
+	}
+
+	if (!hitOK)
+	{
+		std::cout << "No terrain hit\n";
+		return;
+	}
+
+	if (btnState & MK_LBUTTON)
+		std::cout << "LMB terrain UV = " << uv.x << " " << uv.y
+		<< " world: " << hit.x << " " << hit.y << " " << hit.z << "\n";
+
+	if (btnState & MK_RBUTTON)
+		std::cout << "RMB terrain UV = " << uv.x << " " << uv.y
+		<< " world: " << hit.x << " " << hit.y << " " << hit.z << "\n";
 }
 
 void TexColumnsApp::OnMouseUp(WPARAM btnState, int x, int y)
 {
+	mBrushActive = false;
     ReleaseCapture();
 }
 
@@ -991,10 +1092,44 @@ void  TexColumnsApp::UpdateTerrainCBs(const GameTimer& gt)
 		tConstants.TileSize = t->tileSize;
 		tConstants.mapSize = mTerrain->mWorldSize;
 		tConstants.hScale = heightScale;
+
+		if (mBrushActive)
+		{
+			tConstants.HitUV = mBrushHitUV;
+			tConstants.BrushRadius = mBrushRadius;
+
+			// Определяем режим кисти по нажатым кнопкам мыши
+			bool leftDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+			bool rightDown = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
+
+			if (leftDown)
+				tConstants.BrushActive = 1.0f;      // Поднимаем
+			else if (rightDown)
+				tConstants.BrushActive = -1.0f;     // Опускаем
+			else
+				tConstants.BrushActive = 0.0f;      // Кисть неактивна
+
+
+		}
+
+		else
+		{
+			// Кисть неактивна
+			tConstants.HitUV = XMFLOAT2(-1, -1);
+			tConstants.BrushRadius = 0.0f;
+			tConstants.BrushActive = 0.0f;
+		}
+
+		tConstants.BrushRadius = mBrushRadius;
+		tConstants.BrushActive = mBrushActive ? 1.0f : 0.0f;
+
+
 		currTileCB->CopyData(t->tileIndex, tConstants);
 
 		t->NumFramesDirty--;
 	}
+	std::cout << "Size of TerrainConstants in C++: " << sizeof(TerrainConstants) << " bytes\n";
+
 }
 
 void TexColumnsApp::CreateGBuffer()
