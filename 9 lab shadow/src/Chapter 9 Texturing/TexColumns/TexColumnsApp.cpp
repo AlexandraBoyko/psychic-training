@@ -564,7 +564,7 @@ bool TexColumnsApp::Initialize()
 
  
 	LoadAllTextures();
-	
+	InitializeHeightModificationTexture();
 	//mHeightMapResource = mTextures["textures/terr_height"]->Resource;
 	/*auto it = mTextures.find("terr_height");
 	assert(it != mTextures.end());
@@ -586,7 +586,7 @@ bool TexColumnsApp::Initialize()
 	mTerrain->InitializeTerrain(md3dDevice.Get(), TexOffsets["textures/terr_height"], 512, 6);
 	BuildTerrainGeometry();
 
-	InitializeHeightModificationTexture();
+	//InitializeHeightModificationTexture();
     BuildShapeGeometry();
 	SetLightShapes();
     BuildShadersAndInputLayout();
@@ -824,6 +824,21 @@ void TexColumnsApp::OnMouseMove(WPARAM btnState, int x, int y)
 
 		}
 
+		if ((btnState & MK_LBUTTON) != 0 || (btnState & MK_RBUTTON) != 0)
+		{
+			XMFLOAT2 uv;
+			XMFLOAT3 hit;
+			if (RaycastToTerrainUV(x, y, uv, hit))
+			{
+				// Применяем кисть с сохранением
+				bool raise = ((btnState & MK_LBUTTON) != 0);
+				ApplyBrushWithPersistence(uv, raise);
+
+				// Также обновляем для отображения в реальном времени
+				mBrushActive = true;
+				mBrushHitUV = uv;
+			}
+		}
 
 		mLastMousePos.x = x;
 		mLastMousePos.y = y;
@@ -3393,14 +3408,14 @@ void TexColumnsApp::DrawTileRenderItems(ID3D12GraphicsCommandList* cmdList, std:
 		cmdList->DrawIndexedInstanced(ri->IndexCount, 1, ri->StartIndexLocation, ri->BaseVertexLocation, 0);
 	}
 
-	static int drawCount = 0;
-	drawCount++;
-	if (drawCount % 60 == 0) // Выводить каждую секунду (при 60 FPS)
-	{
-		std::cout << "Drawing " << tiles.size() << " tiles. "
-			<< "HeightMod SRV index: " << mHeightModificationSrvIndex
-			<< ", Data dirty: " << mHeightModificationDirty << std::endl;
-	}
+	//static int drawCount = 0;
+	//drawCount++;
+	//if (drawCount % 60 == 0) // Выводить каждую секунду (при 60 FPS)
+	//{
+	//	std::cout << "Drawing " << tiles.size() << " tiles. "
+	//		<< "HeightMod SRV index: " << mHeightModificationSrvIndex
+	//		<< ", Data dirty: " << mHeightModificationDirty << std::endl;
+	//}
 
 }
 
