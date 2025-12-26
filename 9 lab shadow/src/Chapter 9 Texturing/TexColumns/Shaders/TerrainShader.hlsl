@@ -36,18 +36,22 @@ cbuffer cbTerrainTile : register(b3)
 {
     float3 gTilePosition;
     float gTileSize;
+    
     float mapSize;
     float heightScale;
+    float2 padding1;
     
     float2 gHitUV; // <--- ДОБАВЛЕНО
     float gBrushRadius; // <--- ДОБАВЛЕНО
     float gBrushActive;
+    float padding2;
 
 };
 // Texture resources
 Texture2D gHeightMap : register(t0);
 Texture2D gDiffuseMap : register(t1);
 Texture2D gNormalMap : register(t2); 
+Texture2D gHeightModificationMap : register(t3); // Используем t3
 
 SamplerState gSamPointWrap : register(s0);
 SamplerState gSamPointClamp : register(s1);
@@ -95,9 +99,16 @@ VertexOut VS(VertexIn vin)
     vout.TexC += gTilePosition.xz / mapSize;
     vout.TexCl = vin.TexC;
 
-    float height = gHeightMap.SampleLevel(gSamLinearClamp, vout.TexC, 0).r;
     
-        // ПРОБЛЕМА МОЖЕТ БЫТЬ ЗДЕСЬ!
+    float baseHeight = gHeightMap.SampleLevel(gSamLinearClamp, vout.TexC, 0).r;
+    float heightMod = gHeightModificationMap.SampleLevel(gSamLinearClamp, vout.TexC, 0).r;
+    float finalHeight = baseHeight + heightMod * 10.0f;
+    
+    // Ограничиваем значение
+    finalHeight = clamp(finalHeight, 0.0, 1.0);
+    //float height = gHeightMap.SampleLevel(gSamLinearClamp, vout.TexC, 0).r;
+
+    
     if (gBrushActive != 0.0f)
     {
         float dist = distance(vout.TexC, gHitUV);
@@ -111,23 +122,21 @@ VertexOut VS(VertexIn vin)
             if (gBrushActive > 0.0f)
             {
                 // Поднимаем террейн
-                height += 0.1f * falloff;
-                // Отладочный вывод через цвет (можно убрать позже)
-                // В реальности нельзя выводить в консоль из шейдера,
-                // но можно визуализировать через цвет
+                finalHeight += 0.1f * falloff;
+
             }
             else if (gBrushActive < 0.0f)
             {
                 // Опускаем террейн
-                height -= 0.1f * falloff;
+                finalHeight -= 0.1f * falloff;
             }
             
-            height = clamp(height, 0.0, 1.0);
+            finalHeight = clamp(finalHeight, 0.0, 1.0);
         }
     }
 
     float3 posL = vin.PosL;
-    posL.y = posL.y + height * heightScale;
+    posL.y = posL.y + finalHeight * heightScale;
     
 
     float4 posW = mul(float4(posL, 1.0f), gWorld);
@@ -195,16 +204,16 @@ PixelOut PS(VertexOut pin) : SV_Target
             diffuseAlbedo *= gDiffuseAlbedo;
             
             // Выбираем цвет кисти
-            float4 brushColor = float4(1, 0, 0, 0.5f); // Красный для поднятия
+            float4 brushColor = float4(1, 0, 0, 0.5f); 
             if (gBrushActive < -0.5f)
-                brushColor = float4(0, 0, 1, 0.5f); // Синий для опускания
+                brushColor = float4(0, 0, 1, 0.5f);
             
             // Смешиваем с текстурой
             diffuseAlbedo.rgb = lerp(diffuseAlbedo.rgb, brushColor.rgb, brushColor.a * intensity);
             
             pout.Albedo = diffuseAlbedo;
             
-            // Нормали и позиция (используем оригинальные)
+            // Нормали и позиция
             float3 normalMapSample = gNormalMap.Sample(gSamAnisotropicWrap, pin.TexC).rgb;
             pin.NormalW = normalize(pin.NormalW);
             pin.TangentW = normalize(pin.TangentW);

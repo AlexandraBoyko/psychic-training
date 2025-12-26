@@ -51,12 +51,18 @@ struct TerrainConstants
 {
     DirectX::XMFLOAT3 TilePosition;
     float TileSize;
+
     float mapSize;
     float hScale;
+    float padding1[2];
 
     DirectX::XMFLOAT2 HitUV;      //  <---
     float BrushRadius;   //  <---
-    float BrushActive;   
+    float BrushActive;
+    float padding2;
+
+    DirectX::XMUINT2 TextureSize;
+    float Padding2[2];
 };
 
 struct Vertex

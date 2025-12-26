@@ -1,4 +1,4 @@
-//***************************************************************************************
+п»ї//***************************************************************************************
 // TexColumnsApp.cpp by Frank Luna (C) 2015 All Rights Reserved.
 //***************************************************************************************
 #include "../../Common/Camera.h"
@@ -341,11 +341,22 @@ private:
 	void GenerateTileGeometry(const XMFLOAT3& worldPos, float tileSize, int lodLevel, std::vector<Vertex>& vertices, std::vector<std::uint32_t>& indices);
 	void BuildTerrainGeometry();
 	void BuildTerrainRootSignature();
+	void BuildTerrainComputeRootSignature();
 	void DrawTileRenderItems(ID3D12GraphicsCommandList* cmdList, std::vector<Tile*> tiles, int HeightIndex);
 	void UpdateTerrainCBs(const GameTimer& gt);
 	void UpdateTerrain(const GameTimer& gt);
 
 	bool TexColumnsApp::RaycastToTerrainUV(int sx, int sy, XMFLOAT2& uvOut, XMFLOAT3& hitWorld);
+	void TexColumnsApp::InitializeHeightModificationTexture();
+	void TexColumnsApp::ApplyBrushWithPersistence(const XMFLOAT2& uv, bool raise);
+	void TexColumnsApp::UpdateHeightModificationTexture();
+
+	void BuildTerrainUpdateRootSignature();
+	void BuildTerrainUpdatePSO();
+	void CreateHeightMapResources();
+	void UpdateTerrainWithCompute();
+	void LoadHeightmapWithUAV(const std::wstring& filename);
+
 
 private:
 	std::unordered_map<std::string, unsigned int>ObjectsMeshCount;
@@ -361,6 +372,8 @@ private:
     ComPtr<ID3D12RootSignature> mLightingRootSignature = nullptr;
 	ComPtr<ID3D12RootSignature> mShadowPassRootSignature = nullptr;
 	ComPtr<ID3D12RootSignature> mTerrainRootSignature = nullptr;
+	ComPtr<ID3D12RootSignature> mTerrainComputeRootSignature = nullptr;
+
 
 
 	ComPtr<ID3D12DescriptorHeap> mSrvDescriptorHeap = nullptr;
@@ -397,17 +410,17 @@ private:
 	float heightScale = 100;
 
 
-	// G-Buffer ресурсы
+	// G-Buffer СЂРµСЃСѓСЂСЃС‹
 	ComPtr<ID3D12Resource> mGBufferPosition;
 	ComPtr<ID3D12Resource> mGBufferNormal;
 	ComPtr<ID3D12Resource> mGBufferAlbedo;
 	ComPtr<ID3D12Resource> mGBufferDepthStencil;
 	ComPtr<ID3D12DescriptorHeap> mGBufferSrvHeap = nullptr;
 
-	// Дескрипторы для G-Buffer
+	// Р”РµСЃРєСЂРёРїС‚РѕСЂС‹ РґР»СЏ G-Buffer
 	CD3DX12_CPU_DESCRIPTOR_HANDLE mGBufferRTVs[3]; // 0:Position, 1:Normal, 2:Albedo
 	CD3DX12_CPU_DESCRIPTOR_HANDLE mGBufferDSV;
-	CD3DX12_GPU_DESCRIPTOR_HANDLE mGBufferSRVs[3]; // SRV для шейдеров
+	CD3DX12_GPU_DESCRIPTOR_HANDLE mGBufferSRVs[3]; // SRV РґР»СЏ С€РµР№РґРµСЂРѕРІ
 
 	UINT mGBufferRTVDescriptorSize;
 	UINT mGBufferDSVDescriptorSize;
@@ -424,22 +437,51 @@ private:
 	D3D12_RECT mShadowScissorRect;
 
 
-	int mShadowDebugLightIndex = 0; // какой light показываем в overlay
+	int mShadowDebugLightIndex = 0; // РєР°РєРѕР№ light РїРѕРєР°Р·С‹РІР°РµРј РІ overlay
 	std::vector<int> mShadowCastingLights;
-	int mShadowDebugLightIdx = 0; // индекс в этом массиве
+	int mShadowDebugLightIdx = 0; // РёРЅРґРµРєСЃ РІ СЌС‚РѕРј РјР°СЃСЃРёРІРµ
 
-	// Размеры как у окна
+	// Р Р°Р·РјРµСЂС‹ РєР°Рє Сѓ РѕРєРЅР°
 	UINT width = mClientWidth;
 	UINT height = mClientHeight;
 
-	// Форматы:
+	// Р¤РѕСЂРјР°С‚С‹:
 	const DXGI_FORMAT positionFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
 	const DXGI_FORMAT normalFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 	const DXGI_FORMAT albedoFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 
-	bool     mBrushActive = false;      // ЛКМ нажата?
-	XMFLOAT2 mBrushHitUV = { -1.0f, -1.0f }; // куда попали в UV
-	float    mBrushRadius = 0.02f;      // радиус кисти (в uv)
+	bool     mBrushActive = false; 
+	XMFLOAT2 mBrushHitUV = { -1.0f, -1.0f }; 
+	float    mBrushRadius = 0.05f;     
+	float mBrushStrength = 0.1f;
+
+	Microsoft::WRL::ComPtr<ID3D12Resource> mHeightMapTexture;        // SRV РІРµСЂСЃРёСЏ
+	Microsoft::WRL::ComPtr<ID3D12Resource> mHeightMapTextureUAV;     // UAV РІРµСЂСЃРёСЏ РґР»СЏ Р·Р°РїРёСЃРё
+	Microsoft::WRL::ComPtr<ID3D12Resource> mHeightMapStagingBuffer;  // Р”Р»СЏ Р·Р°РіСЂСѓР·РєРё РґР°РЅРЅС‹С…
+
+	int mHeightMapSrvHeapIndex = -1;
+	int mHeightMapUavHeapIndex = -1;
+
+	bool mTerrainNeedsUpdate = false;
+	UINT mHeightMapWidth = 512;
+	UINT mHeightMapHeight = 512;
+
+
+	ComPtr<ID3D12Resource> mHeightMapResource;
+
+	ComPtr<ID3D12Resource> mHeightModificationTexture;    // РўРµРєСЃС‚СѓСЂР° РёР·РјРµРЅРµРЅРёР№ РІС‹СЃРѕС‚С‹ (R32_FLOAT)
+	ComPtr<ID3D12Resource> mHeightModificationTextureUpload;
+	std::vector<float> mHeightModificationData;
+
+	UINT mHeightModificationWidth =512;
+	UINT mHeightModificationHeight = 512;
+
+	bool mHeightModificationDirty = false;
+	D3D12_CPU_DESCRIPTOR_HANDLE mHeightModificationSrvHandle;
+	int mHeightModificationSrvIndex = -1;
+	Microsoft::WRL::ComPtr<ID3D12PipelineState> mTerrainUpdatePSO;
+	Microsoft::WRL::ComPtr<ID3D12RootSignature> mTerrainUpdateRootSignature;
+
 
 };
 
@@ -500,10 +542,10 @@ void TexColumnsApp::MoveUpDown(float step) {
 
 bool TexColumnsApp::Initialize()
 {
-	// Создаем консольное окно.
+	// РЎРѕР·РґР°РµРј РєРѕРЅСЃРѕР»СЊРЅРѕРµ РѕРєРЅРѕ.
 	AllocConsole();
 
-	// Перенаправляем стандартные потоки.
+	// РџРµСЂРµРЅР°РїСЂР°РІР»СЏРµРј СЃС‚Р°РЅРґР°СЂС‚РЅС‹Рµ РїРѕС‚РѕРєРё.
 	 freopen("CONIN$", "r", stdin);
 	freopen("CONOUT$", "w", stdout);
 	freopen("CONOUT$", "w", stderr);
@@ -522,11 +564,20 @@ bool TexColumnsApp::Initialize()
 
  
 	LoadAllTextures();
+	
+	//mHeightMapResource = mTextures["textures/terr_height"]->Resource;
+	/*auto it = mTextures.find("terr_height");
+	assert(it != mTextures.end());
+	assert(it->second->Resource != nullptr);
+
+	mHeightMapResource = it->second->Resource;*/
+	//BuildMaterials();
     BuildRootSignature();
     BuildLightingRootSignature();
 	BuildShadowPassRootSignature();
 	// TERRAIN HERE
 	BuildTerrainRootSignature();
+	BuildTerrainComputeRootSignature();
 	BuildLights();
 	BuildShadowMapViews();
 	BuildDescriptorHeaps();
@@ -534,6 +585,8 @@ bool TexColumnsApp::Initialize()
 	mTerrain = std::make_unique<Terrain>();
 	mTerrain->InitializeTerrain(md3dDevice.Get(), TexOffsets["textures/terr_height"], 512, 6);
 	BuildTerrainGeometry();
+
+	InitializeHeightModificationTexture();
     BuildShapeGeometry();
 	SetLightShapes();
     BuildShadersAndInputLayout();
@@ -647,7 +700,7 @@ void TexColumnsApp::Update(const GameTimer& gt)
 
 bool TexColumnsApp::RaycastToTerrainUV(int sx, int sy, XMFLOAT2& uvOut, XMFLOAT3& hitWorld)
 {
-	// Матрицы камеры
+	// РњР°С‚СЂРёС†С‹ РєР°РјРµСЂС‹
 	XMMATRIX view = cam.GetView();
 	XMMATRIX proj = cam.GetProj();
 	XMMATRIX invView = XMMatrixInverse(nullptr, view);
@@ -667,30 +720,30 @@ bool TexColumnsApp::RaycastToTerrainUV(int sx, int sy, XMFLOAT2& uvOut, XMFLOAT3
 	XMVECTOR rayWorld = XMVector3Normalize(XMVector3TransformNormal(rayView, invView));
 	XMVECTOR camPos = cam.GetPosition();
 
-	// Плоскость террейна: y = 0
+	// РџР»РѕСЃРєРѕСЃС‚СЊ С‚РµСЂСЂРµР№РЅР°: y = 0
 	float camY = XMVectorGetY(camPos);
 	float rayY = XMVectorGetY(rayWorld);
 
-	// Если луч параллелен земле — пересечения нет
+	// Р•СЃР»Рё Р»СѓС‡ РїР°СЂР°Р»Р»РµР»РµРЅ Р·РµРјР»Рµ вЂ” РїРµСЂРµСЃРµС‡РµРЅРёСЏ РЅРµС‚
 	if (fabs(rayY) < 1e-6f)
 		return false;
 
-	// t — точка пересечения луча с y=0
+	// t вЂ” С‚РѕС‡РєР° РїРµСЂРµСЃРµС‡РµРЅРёСЏ Р»СѓС‡Р° СЃ y=0
 	float t = -camY / rayY;
 	if (t < 0.0f)
-		return false; // земля позади камеры
+		return false; // Р·РµРјР»СЏ РїРѕР·Р°РґРё РєР°РјРµСЂС‹
 
 	// hit point
 	XMVECTOR p = camPos + rayWorld * t;
 	XMStoreFloat3(&hitWorld, p);
 
-	// проверка внутри террейна
+	// РїСЂРѕРІРµСЂРєР° РІРЅСѓС‚СЂРё С‚РµСЂСЂРµР№РЅР°
 	if (hitWorld.x < 0 || hitWorld.z < 0 ||
 		hitWorld.x > mTerrain->GetWorldSize() ||
 		hitWorld.z > mTerrain->GetWorldSize())
 		return false;
 
-	// UV координаты
+	// UV РєРѕРѕСЂРґРёРЅР°С‚С‹
 	uvOut.x = hitWorld.x / mTerrain->GetWorldSize();
 	uvOut.y = hitWorld.z / mTerrain->GetWorldSize();
 
@@ -714,10 +767,24 @@ void TexColumnsApp::OnMouseDown(WPARAM btnState, int x, int y)
 	XMFLOAT2 uv;
 	XMFLOAT3 hit;
 	bool hitOK = RaycastToTerrainUV(x, y, uv, hit);
+
 	if (RaycastToTerrainUV(x, y, uv, hit))
 	{
 		mBrushActive = true;
 		mBrushHitUV = uv;
+		if (RaycastToTerrainUV(x, y, uv, hit))
+		{
+			// РџСЂРёРјРµРЅСЏРµРј РєРёСЃС‚СЊ СЃ СЃРѕС…СЂР°РЅРµРЅРёРµРј
+			bool raise = ((btnState & MK_LBUTTON) != 0);
+			ApplyBrushWithPersistence(uv, raise);
+
+			// РўР°РєР¶Рµ РѕР±РЅРѕРІР»СЏРµРј РґР»СЏ РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ РІ СЂРµР°Р»СЊРЅРѕРј РІСЂРµРјРµРЅРё
+			mBrushActive = true;
+			mBrushHitUV = uv;
+
+			//std::cout << "Mouse painting at UV: (" << uv.x << ", " << uv.y
+			//	<< "), World: (" << hit.x << ", " << hit.y << ", " << hit.z << ")" << std::endl;
+		}
 	}
 
 	if (!hitOK)
@@ -756,10 +823,14 @@ void TexColumnsApp::OnMouseMove(WPARAM btnState, int x, int y)
 			cam.YawPitch(dx, -dy);
 
 		}
+
+
 		mLastMousePos.x = x;
 		mLastMousePos.y = y;
 	}
 }
+
+
 
  
 void TexColumnsApp::OnKeyPressed(const GameTimer& gt, WPARAM key)
@@ -1098,50 +1169,50 @@ void  TexColumnsApp::UpdateTerrainCBs(const GameTimer& gt)
 			tConstants.HitUV = mBrushHitUV;
 			tConstants.BrushRadius = mBrushRadius;
 
-			// Определяем режим кисти по нажатым кнопкам мыши
+
 			bool leftDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
 			bool rightDown = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
 
 			if (leftDown)
-				tConstants.BrushActive = 1.0f;      // Поднимаем
+				tConstants.BrushActive = 5.0f;      // РџРѕРґРЅРёРјР°РµРј
 			else if (rightDown)
-				tConstants.BrushActive = -1.0f;     // Опускаем
+				tConstants.BrushActive = -5.0f;     // РћРїСѓСЃРєР°РµРј
 			else
-				tConstants.BrushActive = 0.0f;      // Кисть неактивна
+				tConstants.BrushActive = 0.0f;      // РљРёСЃС‚СЊ РЅРµР°РєС‚РёРІРЅР°
 
 
 		}
 
 		else
 		{
-			// Кисть неактивна
+			// РљРёСЃС‚СЊ РЅРµР°РєС‚РёРІРЅР°
 			tConstants.HitUV = XMFLOAT2(-1, -1);
 			tConstants.BrushRadius = 0.0f;
 			tConstants.BrushActive = 0.0f;
 		}
 
 		tConstants.BrushRadius = mBrushRadius;
-		tConstants.BrushActive = mBrushActive ? 1.0f : 0.0f;
+		//tConstants.BrushActive = mBrushActive ? 1.0f : 0.0f;
 
 
 		currTileCB->CopyData(t->tileIndex, tConstants);
 
 		t->NumFramesDirty--;
 	}
-	std::cout << "Size of TerrainConstants in C++: " << sizeof(TerrainConstants) << " bytes\n";
+	//std::cout << "Size of TerrainConstants in C++: " << sizeof(TerrainConstants) << " bytes\n";
 
 }
 
 void TexColumnsApp::CreateGBuffer()
 {
-	// Форматы
+	// Р¤РѕСЂРјР°С‚С‹
 	const DXGI_FORMAT positionFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
 	const DXGI_FORMAT normalFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 	const DXGI_FORMAT albedoFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 	FlushCommandQueue();
 
 	ThrowIfFailed(mCommandList->Reset(mDirectCmdListAlloc.Get(), nullptr));
-	// Описание ресурса
+	// РћРїРёСЃР°РЅРёРµ СЂРµСЃСѓСЂСЃР°
 	D3D12_RESOURCE_DESC texDesc = {};
 	texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
 	texDesc.Alignment = 0;
@@ -1157,7 +1228,7 @@ void TexColumnsApp::CreateGBuffer()
 	mGBufferPosition.Reset();
 	mGBufferNormal.Reset();
 	mGBufferAlbedo.Reset();
-	// Создание ресурсов --------------------------------------------------------
+	// РЎРѕР·РґР°РЅРёРµ СЂРµСЃСѓСЂСЃРѕРІ --------------------------------------------------------
 	// Position
 	texDesc.Format = positionFormat;
 	ThrowIfFailed(md3dDevice->CreateCommittedResource(
@@ -1188,10 +1259,10 @@ void TexColumnsApp::CreateGBuffer()
 		&CD3DX12_CLEAR_VALUE(albedoFormat, Colors::Black),
 		IID_PPV_ARGS(&mGBufferAlbedo)));
 
-	// Создание RTV -------------------------------------------------------------
+	// РЎРѕР·РґР°РЅРёРµ RTV -------------------------------------------------------------
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(
 		mRtvHeap->GetCPUDescriptorHandleForHeapStart(),
-		SwapChainBufferCount, // Начинаем после SwapChain
+		SwapChainBufferCount, // РќР°С‡РёРЅР°РµРј РїРѕСЃР»Рµ SwapChain
 		mRtvDescriptorSize
 	);
 
@@ -1258,10 +1329,10 @@ void TexColumnsApp::LoadTexture(const std::string& name)
 void TexColumnsApp::BuildRootSignature()
 {
 	CD3DX12_DESCRIPTOR_RANGE diffuseRange;
-	diffuseRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // Диффузная текстура в регистре t0
+	diffuseRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // Р”РёС„С„СѓР·РЅР°СЏ С‚РµРєСЃС‚СѓСЂР° РІ СЂРµРіРёСЃС‚СЂРµ t0
 
 	CD3DX12_DESCRIPTOR_RANGE normalRange;
-	normalRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1);  // Нормальная карта в регистре t1
+	normalRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1);  // РќРѕСЂРјР°Р»СЊРЅР°СЏ РєР°СЂС‚Р° РІ СЂРµРіРёСЃС‚СЂРµ t1
 
     // Root parameter can be a table, root descriptor or root constants.
     CD3DX12_ROOT_PARAMETER slotRootParameter[5];
@@ -1302,31 +1373,35 @@ void TexColumnsApp::BuildRootSignature()
 void TexColumnsApp::BuildTerrainRootSignature()
 {
 	CD3DX12_DESCRIPTOR_RANGE heightRange;
-	heightRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // Диффузная текстура в регистре t0
+	heightRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // Р”РёС„С„СѓР·РЅР°СЏ С‚РµРєСЃС‚СѓСЂР° РІ СЂРµРіРёСЃС‚СЂРµ t0
 
 	CD3DX12_DESCRIPTOR_RANGE diffuseRange;
-	diffuseRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1); // Диффузная текстура в регистре t0
+	diffuseRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1); // Р”РёС„С„СѓР·РЅР°СЏ С‚РµРєСЃС‚СѓСЂР° РІ СЂРµРіРёСЃС‚СЂРµ t0
 
 	CD3DX12_DESCRIPTOR_RANGE normalRange;
-	normalRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 2);  // Нормальная карта в регистре t1
+	normalRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 2);  // РќРѕСЂРјР°Р»СЊРЅР°СЏ РєР°СЂС‚Р° РІ СЂРµРіРёСЃС‚СЂРµ t1
+
+	CD3DX12_DESCRIPTOR_RANGE heightModRange;
+	heightModRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 3); // t3 - gHeightModificationMap (РќРћР’РђРЇ!)
 
 	// Root parameter can be a table, root descriptor or root constants.
-	CD3DX12_ROOT_PARAMETER slotRootParameter[7];
+	CD3DX12_ROOT_PARAMETER slotRootParameter[8];
 
 	// Perfomance TIP: Order from most frequent to least frequent.
 	slotRootParameter[0].InitAsDescriptorTable(1, &heightRange, D3D12_SHADER_VISIBILITY_ALL);
 	slotRootParameter[1].InitAsDescriptorTable(1, &diffuseRange, D3D12_SHADER_VISIBILITY_ALL);
 	slotRootParameter[2].InitAsDescriptorTable(1, &normalRange, D3D12_SHADER_VISIBILITY_ALL);
+	slotRootParameter[3].InitAsDescriptorTable(1, &heightModRange, D3D12_SHADER_VISIBILITY_ALL);
 
-	slotRootParameter[3].InitAsConstantBufferView(0); // register b0
-	slotRootParameter[4].InitAsConstantBufferView(1); // register b1
-	slotRootParameter[5].InitAsConstantBufferView(2); // register b2
-	slotRootParameter[6].InitAsConstantBufferView(3); // register b3
+	slotRootParameter[4].InitAsConstantBufferView(0); // register b0
+	slotRootParameter[5].InitAsConstantBufferView(1); // register b1
+	slotRootParameter[6].InitAsConstantBufferView(2); // register b2
+	slotRootParameter[7].InitAsConstantBufferView(3); // register b3
 
 	auto staticSamplers = GetStaticSamplers();
 
 	// A root signature is an array of root parameters.
-	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(7, slotRootParameter,
+	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(8, slotRootParameter,
 		(UINT)staticSamplers.size(), staticSamplers.data(),
 		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
@@ -1349,6 +1424,65 @@ void TexColumnsApp::BuildTerrainRootSignature()
 		IID_PPV_ARGS(mTerrainRootSignature.GetAddressOf())));
 }
 
+
+void TexColumnsApp::BuildTerrainComputeRootSignature()
+{
+	// UAV: RWTexture2D<float>
+	CD3DX12_DESCRIPTOR_RANGE uavRange;
+	uavRange.Init(
+		D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
+		1,      // РѕРґРёРЅ UAV
+		0       // register(u0)
+	);
+
+	CD3DX12_ROOT_PARAMETER slotRootParameter[2];
+
+	// u0 вЂ” heightmap UAV
+	slotRootParameter[0].InitAsDescriptorTable(
+		1,
+		&uavRange,
+		D3D12_SHADER_VISIBILITY_ALL
+	);
+
+	// b3 вЂ” cbTerrainTile (С‚РѕС‚ Р¶Рµ СЃР°РјС‹Р№!)
+	slotRootParameter[1].InitAsConstantBufferView(
+		3 // register(b3)
+	);
+
+	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(
+		_countof(slotRootParameter),
+		slotRootParameter,
+		0,
+		nullptr,
+		D3D12_ROOT_SIGNATURE_FLAG_NONE // compute вЂ” Р±РµР· IA
+	);
+
+	ComPtr<ID3DBlob> serializedRootSig = nullptr;
+	ComPtr<ID3DBlob> errorBlob = nullptr;
+
+	HRESULT hr = D3D12SerializeRootSignature(
+		&rootSigDesc,
+		D3D_ROOT_SIGNATURE_VERSION_1,
+		serializedRootSig.GetAddressOf(),
+		errorBlob.GetAddressOf()
+	);
+
+	if (errorBlob != nullptr)
+	{
+		::OutputDebugStringA((char*)errorBlob->GetBufferPointer());
+	}
+	ThrowIfFailed(hr);
+
+	ThrowIfFailed(md3dDevice->CreateRootSignature(
+		0,
+		serializedRootSig->GetBufferPointer(),
+		serializedRootSig->GetBufferSize(),
+		IID_PPV_ARGS(mTerrainComputeRootSignature.GetAddressOf())
+	));
+}
+
+
+
 // build lighting root signature 
 void TexColumnsApp::BuildLightingRootSignature()
 {
@@ -1365,7 +1499,7 @@ void TexColumnsApp::BuildLightingRootSignature()
 
 	CD3DX12_DESCRIPTOR_RANGE debugShadowRange;
 
-	debugShadowRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 10); // например t10
+	debugShadowRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 10); // РЅР°РїСЂРёРјРµСЂ t10
 
 	CD3DX12_ROOT_PARAMETER rootParams[8];
 	rootParams[0].InitAsDescriptorTable(1, &gPosition, D3D12_SHADER_VISIBILITY_ALL);
@@ -1604,13 +1738,13 @@ void TexColumnsApp::BuildDescriptorHeaps()
 	// Create the SRV heap.
 	//
 	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
-	srvHeapDesc.NumDescriptors = mTextures.size() + 3 + mLights.size();
+	srvHeapDesc.NumDescriptors = mTextures.size() + 3 + mLights.size() + 1 +1;
 	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&mSrvDescriptorHeap)));
 
 
-	// Создание SRV -------------------------------------------------------------
+	// РЎРѕР·РґР°РЅРёРµ SRV -------------------------------------------------------------
 
 	//
 	// Fill out the heap with actual descriptors.
@@ -1667,7 +1801,20 @@ void TexColumnsApp::BuildDescriptorHeaps()
 			md3dDevice->CreateShaderResourceView(light.ShadowMap.Get(), &srvDesc, shadowMapSrvHandle);
 		}
 	}
-	
+
+	mHeightModificationSrvIndex = mTextures.size() + 3 + mLights.size(); // РџРѕСЃР»Рµ shadow maps
+	CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(mSrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+	srvHandle.Offset(mHeightModificationSrvIndex, mCbvSrvDescriptorSize);
+
+	//D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+	srvDesc.Texture2D.MostDetailedMip = 0;
+	srvDesc.Texture2D.MipLevels = 1;
+
+	md3dDevice->CreateShaderResourceView(mHeightModificationTexture.Get(), &srvDesc, srvHandle);
+	mHeightModificationSrvHandle = srvHandle;
 
 
 	HRESULT hr = md3dDevice->GetDeviceRemovedReason();
@@ -1710,12 +1857,12 @@ void TexColumnsApp::BuildShadersAndInputLayout()
 }
 void TexColumnsApp::BuildCustomMeshGeometry(std::string name, UINT& meshVertexOffset, UINT& meshIndexOffset, UINT& prevVertSize, UINT& prevIndSize, std::vector<Vertex>& vertices, std::vector<std::uint16_t>& indices, MeshGeometry* Geo)
 {
-	std::vector<GeometryGenerator::MeshData> meshDatas; // Это твоя структура для хранения вершин и индексов
+	std::vector<GeometryGenerator::MeshData> meshDatas; // Р­С‚Рѕ С‚РІРѕСЏ СЃС‚СЂСѓРєС‚СѓСЂР° РґР»СЏ С…СЂР°РЅРµРЅРёСЏ РІРµСЂС€РёРЅ Рё РёРЅРґРµРєСЃРѕРІ
 
-	// Создаем инстанс импортера.
+	// РЎРѕР·РґР°РµРј РёРЅСЃС‚Р°РЅСЃ РёРјРїРѕСЂС‚РµСЂР°.
 	Assimp::Importer importer;
 
-	// Читаем файл с постпроцессингом: триангуляция, флип UV (если нужно) и генерация нормалей.
+	// Р§РёС‚Р°РµРј С„Р°Р№Р» СЃ РїРѕСЃС‚РїСЂРѕС†РµСЃСЃРёРЅРіРѕРј: С‚СЂРёР°РЅРіСѓР»СЏС†РёСЏ, С„Р»РёРї UV (РµСЃР»Рё РЅСѓР¶РЅРѕ) Рё РіРµРЅРµСЂР°С†РёСЏ РЅРѕСЂРјР°Р»РµР№.
 	const aiScene* scene = importer.ReadFile("../../Common/" + name + ".obj",
 		aiProcess_Triangulate |
 		aiProcess_ConvertToLeftHanded |
@@ -1734,11 +1881,11 @@ void TexColumnsApp::BuildCustomMeshGeometry(std::string name, UINT& meshVertexOf
 		GeometryGenerator::MeshData meshData;
 		aiMesh* mesh = scene->mMeshes[i];
 
-		// Подготовка контейнеров для вершин и индексов.
+		// РџРѕРґРіРѕС‚РѕРІРєР° РєРѕРЅС‚РµР№РЅРµСЂРѕРІ РґР»СЏ РІРµСЂС€РёРЅ Рё РёРЅРґРµРєСЃРѕРІ.
 		std::vector<GeometryGenerator::Vertex> vertices;
 		std::vector<std::uint16_t> indices;
 
-		// Проходим по всем вершинам и копируем данные.
+		// РџСЂРѕС…РѕРґРёРј РїРѕ РІСЃРµРј РІРµСЂС€РёРЅР°Рј Рё РєРѕРїРёСЂСѓРµРј РґР°РЅРЅС‹Рµ.
 		for (unsigned int i = 0; i < mesh->mNumVertices; ++i)
 		{
 			GeometryGenerator::Vertex v;
@@ -1771,21 +1918,21 @@ void TexColumnsApp::BuildCustomMeshGeometry(std::string name, UINT& meshVertexOf
 
 			}
 
-			// Если необходимо, можно обработать тангенты и другие атрибуты.
+			// Р•СЃР»Рё РЅРµРѕР±С…РѕРґРёРјРѕ, РјРѕР¶РЅРѕ РѕР±СЂР°Р±РѕС‚Р°С‚СЊ С‚Р°РЅРіРµРЅС‚С‹ Рё РґСЂСѓРіРёРµ Р°С‚СЂРёР±СѓС‚С‹.
 			vertices.push_back(v);
 		}
-		// Проходим по всем граням для формирования индексов.
+		// РџСЂРѕС…РѕРґРёРј РїРѕ РІСЃРµРј РіСЂР°РЅСЏРј РґР»СЏ С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ РёРЅРґРµРєСЃРѕРІ.
 		for (unsigned int i = 0; i < mesh->mNumFaces; ++i)
 		{
 			aiFace face = mesh->mFaces[i];
-			// Убедимся, что грань треугольная.
+			// РЈР±РµРґРёРјСЃСЏ, С‡С‚Рѕ РіСЂР°РЅСЊ С‚СЂРµСѓРіРѕР»СЊРЅР°СЏ.
 			if (face.mNumIndices != 3) continue;
 			indices.push_back(static_cast<std::uint16_t>(face.mIndices[0]));
 			indices.push_back(static_cast<std::uint16_t>(face.mIndices[1]));
 			indices.push_back(static_cast<std::uint16_t>(face.mIndices[2]));
 		}
 
-		// Заполняем meshData. Здесь тебе нужно адаптировать под свою структуру:
+		// Р—Р°РїРѕР»РЅСЏРµРј meshData. Р—РґРµСЃСЊ С‚РµР±Рµ РЅСѓР¶РЅРѕ Р°РґР°РїС‚РёСЂРѕРІР°С‚СЊ РїРѕРґ СЃРІРѕСЋ СЃС‚СЂСѓРєС‚СѓСЂСѓ:
 		meshData.Vertices = vertices;
 		meshData.Indices32.resize(indices.size());
 		for (size_t j = 0; j < indices.size(); ++j)
@@ -1797,7 +1944,7 @@ void TexColumnsApp::BuildCustomMeshGeometry(std::string name, UINT& meshVertexOf
 		aiString texPath;
 
 		meshData.matName = scene->mMaterials[mesh->mMaterialIndex]->GetName().C_Str();
-		// Если требуется, можно выполнить дополнительные операции, например, нормализацию, вычисление тангенсов и т.д.
+		// Р•СЃР»Рё С‚СЂРµР±СѓРµС‚СЃСЏ, РјРѕР¶РЅРѕ РІС‹РїРѕР»РЅРёС‚СЊ РґРѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹Рµ РѕРїРµСЂР°С†РёРё, РЅР°РїСЂРёРјРµСЂ, РЅРѕСЂРјР°Р»РёР·Р°С†РёСЋ, РІС‹С‡РёСЃР»РµРЅРёРµ С‚Р°РЅРіРµРЅСЃРѕРІ Рё С‚.Рґ.
 		meshDatas.push_back(meshData);
 	}
 	for (int k = 0;k < scene->mNumMaterials;k++)
@@ -2015,7 +2162,7 @@ void TexColumnsApp::BuildPSOs()
 		mShaders["opaquePS"]->GetBufferSize()
 	};
 	opaquePsoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-	opaquePsoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID; // Изменяем Solid на Wireframe
+	opaquePsoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID; // РР·РјРµРЅСЏРµРј Solid РЅР° Wireframe
 
 	opaquePsoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
 	opaquePsoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
@@ -2032,26 +2179,26 @@ void TexColumnsApp::BuildPSOs()
 
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC gbPsoDesc = {};
 	gbPsoDesc.InputLayout = { mInputLayout.data(), (UINT)mInputLayout.size() };
-	gbPsoDesc.pRootSignature = mRootSignature.Get(); // используем модифицированную корневую сигнатуру
+	gbPsoDesc.pRootSignature = mRootSignature.Get(); // РёСЃРїРѕР»СЊР·СѓРµРј РјРѕРґРёС„РёС†РёСЂРѕРІР°РЅРЅСѓСЋ РєРѕСЂРЅРµРІСѓСЋ СЃРёРіРЅР°С‚СѓСЂСѓ
 	gbPsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["gbufferVS"]->GetBufferPointer()),
 					 mShaders["gbufferVS"]->GetBufferSize() };
 	gbPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["gbufferPS"]->GetBufferPointer()),
 					 mShaders["gbufferPS"]->GetBufferSize() };
 	gbPsoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 	gbPsoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-	// Отключаем прозрачность (или настраиваем, если нужны)
+	// РћС‚РєР»СЋС‡Р°РµРј РїСЂРѕР·СЂР°С‡РЅРѕСЃС‚СЊ (РёР»Рё РЅР°СЃС‚СЂР°РёРІР°РµРј, РµСЃР»Рё РЅСѓР¶РЅС‹)
 	gbPsoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
 	gbPsoDesc.SampleMask = UINT_MAX;
 	gbPsoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 
-	// Теперь указываем несколько рендер-таргетов (G-Buffer)
+	// РўРµРїРµСЂСЊ СѓРєР°Р·С‹РІР°РµРј РЅРµСЃРєРѕР»СЊРєРѕ СЂРµРЅРґРµСЂ-С‚Р°СЂРіРµС‚РѕРІ (G-Buffer)
 	gbPsoDesc.NumRenderTargets = 3;
-	gbPsoDesc.RTVFormats[0] = albedoFormat;     // альбедо
-	gbPsoDesc.RTVFormats[1] = normalFormat; // нормали
-	gbPsoDesc.RTVFormats[2] = positionFormat; // позиция
+	gbPsoDesc.RTVFormats[0] = albedoFormat;     // Р°Р»СЊР±РµРґРѕ
+	gbPsoDesc.RTVFormats[1] = normalFormat; // РЅРѕСЂРјР°Р»Рё
+	gbPsoDesc.RTVFormats[2] = positionFormat; // РїРѕР·РёС†РёСЏ
 	gbPsoDesc.SampleDesc.Count = m4xMsaaState ? 4 : 1;
 	gbPsoDesc.SampleDesc.Quality = m4xMsaaState ? (m4xMsaaQuality - 1) : 0;
-	gbPsoDesc.DSVFormat = mDepthStencilFormat; // з-дефолтовый формат глубины (может быть D32_FLOAT)
+	gbPsoDesc.DSVFormat = mDepthStencilFormat; // Р·-РґРµС„РѕР»С‚РѕРІС‹Р№ С„РѕСЂРјР°С‚ РіР»СѓР±РёРЅС‹ (РјРѕР¶РµС‚ Р±С‹С‚СЊ D32_FLOAT)
 
 	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&gbPsoDesc, IID_PPV_ARGS(&mPSOs["gbuffer"])));
 
@@ -2059,8 +2206,8 @@ void TexColumnsApp::BuildPSOs()
 
 
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC lightPsoDesc = {};
-	lightPsoDesc.InputLayout = { mInputLayout.data(), (UINT)mInputLayout.size() }; // если используем SV_VertexID в шейдере, входного layout не нужно
-	lightPsoDesc.pRootSignature = mLightingRootSignature.Get(); // наша новая корнев. сигнатура для освещения
+	lightPsoDesc.InputLayout = { mInputLayout.data(), (UINT)mInputLayout.size() }; // РµСЃР»Рё РёСЃРїРѕР»СЊР·СѓРµРј SV_VertexID РІ С€РµР№РґРµСЂРµ, РІС…РѕРґРЅРѕРіРѕ layout РЅРµ РЅСѓР¶РЅРѕ
+	lightPsoDesc.pRootSignature = mLightingRootSignature.Get(); // РЅР°С€Р° РЅРѕРІР°СЏ РєРѕСЂРЅРµРІ. СЃРёРіРЅР°С‚СѓСЂР° РґР»СЏ РѕСЃРІРµС‰РµРЅРёСЏ
 	lightPsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["lightingVS"]->GetBufferPointer()),
 						mShaders["lightingVS"]->GetBufferSize() };
 	lightPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["lightingPS"]->GetBufferPointer()),
@@ -2069,13 +2216,13 @@ void TexColumnsApp::BuildPSOs()
 	lightPsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_FRONT;
 
 	D3D12_RENDER_TARGET_BLEND_DESC rtBlendDesc = {};
-	rtBlendDesc.BlendEnable = TRUE;                         // включаем смешивание
+	rtBlendDesc.BlendEnable = TRUE;                         // РІРєР»СЋС‡Р°РµРј СЃРјРµС€РёРІР°РЅРёРµ
 	rtBlendDesc.LogicOpEnable = FALSE;
 	rtBlendDesc.SrcBlend = D3D12_BLEND_ONE;              // src * 1
 	rtBlendDesc.DestBlend = D3D12_BLEND_ONE;              // dest * 1
-	rtBlendDesc.BlendOp = D3D12_BLEND_OP_ADD;           // сложение
+	rtBlendDesc.BlendOp = D3D12_BLEND_OP_ADD;           // СЃР»РѕР¶РµРЅРёРµ
 	rtBlendDesc.SrcBlendAlpha = D3D12_BLEND_ONE;
-	rtBlendDesc.DestBlendAlpha = D3D12_BLEND_ZERO;             // альфа сохраняем из src
+	rtBlendDesc.DestBlendAlpha = D3D12_BLEND_ZERO;             // Р°Р»СЊС„Р° СЃРѕС…СЂР°РЅСЏРµРј РёР· src
 	rtBlendDesc.BlendOpAlpha = D3D12_BLEND_OP_ADD;
 	rtBlendDesc.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL; // RGB + A
 
@@ -2091,15 +2238,15 @@ void TexColumnsApp::BuildPSOs()
 	lightPsoDesc.SampleMask = UINT_MAX;
 	lightPsoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 	
-	lightPsoDesc.NumRenderTargets = 1;                   // выводим один финальный цвет
-	lightPsoDesc.RTVFormats[0] = mBackBufferFormat;      // формат экрана (обычно DXGI_FORMAT_R8G8B8A8_UNORM)
+	lightPsoDesc.NumRenderTargets = 1;                   // РІС‹РІРѕРґРёРј РѕРґРёРЅ С„РёРЅР°Р»СЊРЅС‹Р№ С†РІРµС‚
+	lightPsoDesc.RTVFormats[0] = mBackBufferFormat;      // С„РѕСЂРјР°С‚ СЌРєСЂР°РЅР° (РѕР±С‹С‡РЅРѕ DXGI_FORMAT_R8G8B8A8_UNORM)
 	lightPsoDesc.SampleDesc.Count = m4xMsaaState ? 4 : 1;
 	lightPsoDesc.SampleDesc.Quality = m4xMsaaState ? (m4xMsaaQuality - 1) : 0;
-	lightPsoDesc.DSVFormat = mDepthStencilFormat; // не используем буфер глубины
+	lightPsoDesc.DSVFormat = mDepthStencilFormat; // РЅРµ РёСЃРїРѕР»СЊР·СѓРµРј Р±СѓС„РµСЂ РіР»СѓР±РёРЅС‹
 
 	//D3D12_DEPTH_STENCIL_DESC dsDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
 	//dsDesc.DepthEnable = TRUE;
-	//dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; // можно отключить запись, но оставить тест
+	//dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; // РјРѕР¶РЅРѕ РѕС‚РєР»СЋС‡РёС‚СЊ Р·Р°РїРёСЃСЊ, РЅРѕ РѕСЃС‚Р°РІРёС‚СЊ С‚РµСЃС‚
 	//dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
 	//lightPsoDesc.DepthStencilState = dsDesc;
 
@@ -2121,7 +2268,7 @@ void TexColumnsApp::BuildPSOs()
 	lightShapesPsoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
 	D3D12_DEPTH_STENCIL_DESC dsDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
 	dsDesc.DepthEnable = TRUE;
-	dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; // можно отключить запись, но оставить тест
+	dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; // РјРѕР¶РЅРѕ РѕС‚РєР»СЋС‡РёС‚СЊ Р·Р°РїРёСЃСЊ, РЅРѕ РѕСЃС‚Р°РІРёС‚СЊ С‚РµСЃС‚
 	dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
 	lightShapesPsoDesc.DepthStencilState = dsDesc;
 	lightShapesPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["lightingPSDebug"]->GetBufferPointer()),
@@ -2292,6 +2439,9 @@ void TexColumnsApp::BuildMaterials()
 	CreateMaterial("map2",0, TexOffsets["textures/HeightMap"], TexOffsets["textures/HeightMap"], XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f), XMFLOAT3(0.05f, 0.05f, 0.05f), 0.3f);
 
 	CreateMaterial("TerrainMaterial", (int)mMaterials.size(), TexOffsets["textures/terr_diffuse"], TexOffsets["textures/terr_normal"], XMFLOAT4(0.8f, 0.8f, 0.8f, 1.0f),XMFLOAT3(0.02f, 0.02f, 0.02f),0.8f);
+	//mHeightMapResource = mTextures["textures/terr_height"]->Resource.Get();
+
+
 }
 void TexColumnsApp::RenderCustomMesh(std::string unique_name, std::string meshname, std::string materialName, XMFLOAT3 Scale, XMFLOAT3 Rotation, XMFLOAT3 Position)
 {
@@ -2343,7 +2493,7 @@ void TexColumnsApp::BuildRenderItems()
 	}*/
 
 	std::vector<std::shared_ptr<Tile>>& allTiles = mTerrain->GetAllTiles();
-	// Теперь, для каждого видимого тайла, создаем или обновляем его RenderItem.
+	// РўРµРїРµСЂСЊ, РґР»СЏ РєР°Р¶РґРѕРіРѕ РІРёРґРёРјРѕРіРѕ С‚Р°Р№Р»Р°, СЃРѕР·РґР°РµРј РёР»Рё РѕР±РЅРѕРІР»СЏРµРј РµРіРѕ RenderItem.
 	int a = 0;
 	for (int i = 0; i < 10 && i < allTiles.size(); i++)
 	{
@@ -2365,7 +2515,7 @@ void TexColumnsApp::BuildRenderItems()
 		renderItem->Mat = mMaterials["TerrainMaterial"].get();
 		renderItem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
 		renderItem->Name = "TILE";
-		// Выбираем LOD-уровень в зависимости от глубины узла квадродерева.
+		// Р’С‹Р±РёСЂР°РµРј LOD-СѓСЂРѕРІРµРЅСЊ РІ Р·Р°РІРёСЃРёРјРѕСЃС‚Рё РѕС‚ РіР»СѓР±РёРЅС‹ СѓР·Р»Р° РєРІР°РґСЂРѕРґРµСЂРµРІР°.
 		int lodIndex = tile->lodLevel;
 		std::string lodName = "tile_" + std::to_string(tile->tileIndex) + "_LOD_" + std::to_string(lodIndex);
 		renderItem->Geo = mGeometries["terrainGeo"].get();
@@ -2373,7 +2523,7 @@ void TexColumnsApp::BuildRenderItems()
 		renderItem->StartIndexLocation = renderItem->Geo->DrawArgs[lodName].StartIndexLocation;
 		renderItem->BaseVertexLocation = renderItem->Geo->DrawArgs[lodName].BaseVertexLocation;
 
-		// Обновляем мировую трансформацию тайла
+		// РћР±РЅРѕРІР»СЏРµРј РјРёСЂРѕРІСѓСЋ С‚СЂР°РЅСЃС„РѕСЂРјР°С†РёСЋ С‚Р°Р№Р»Р°
 		XMMATRIX translation = XMMatrixTranslation(tile->worldPos.x, tile->worldPos.y, tile->worldPos.z);
 		//std::cout << tile->worldPos.x << "|" << tile->worldPos.y << "|" << tile->worldPos.z << std::endl;
 		XMStoreFloat4x4(&renderItem->World, translation);
@@ -2524,6 +2674,8 @@ void TexColumnsApp::DrawSceneToShadowMap()
 void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 {
 	//Terrain Stuff
+
+	//UpdateHeightModificationTexture();
 	m_visibleTerrainTiles.clear();
 	mTerrain->GetVisibleTiles(m_visibleTerrainTiles);
 	/*std::cout << "Tiles total:" << mTerrain->GetAllTiles().size() << std::endl;
@@ -2554,23 +2706,23 @@ void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
 		D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
 
-	// Обнуляем буферы G-Buffer
-	// Очищаем каждый G-Buffer и глубину
-	// Стало:
+	// РћР±РЅСѓР»СЏРµРј Р±СѓС„РµСЂС‹ G-Buffer
+	// РћС‡РёС‰Р°РµРј РєР°Р¶РґС‹Р№ G-Buffer Рё РіР»СѓР±РёРЅСѓ
+	// РЎС‚Р°Р»Рѕ:
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHs[] = {
 	CD3DX12_CPU_DESCRIPTOR_HANDLE(
 		mRtvHeap->GetCPUDescriptorHandleForHeapStart(),
-		SwapChainBufferCount, // Начинаем после SwapChain
+		SwapChainBufferCount, // РќР°С‡РёРЅР°РµРј РїРѕСЃР»Рµ SwapChain
 		mRtvDescriptorSize
 	),
 	CD3DX12_CPU_DESCRIPTOR_HANDLE(
 		mRtvHeap->GetCPUDescriptorHandleForHeapStart(),
-		SwapChainBufferCount + 1, // Начинаем после SwapChain
+		SwapChainBufferCount + 1, // РќР°С‡РёРЅР°РµРј РїРѕСЃР»Рµ SwapChain
 		mRtvDescriptorSize
 	),
 	CD3DX12_CPU_DESCRIPTOR_HANDLE(
 		mRtvHeap->GetCPUDescriptorHandleForHeapStart(),
-		SwapChainBufferCount + 2, // Начинаем после SwapChain
+		SwapChainBufferCount + 2, // РќР°С‡РёРЅР°РµРј РїРѕСЃР»Рµ SwapChain
 		mRtvDescriptorSize
 	) };
 	XMFLOAT4 c(mLights[0].Color.x, mLights[0].Color.y, mLights[0].Color.z,1);
@@ -2581,7 +2733,7 @@ void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 	mCommandList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
 	mCommandList->OMSetRenderTargets(3, rtvHs, true, &DepthStencilView());
 	
-	ID3D12DescriptorHeap* heaps[] = { mSrvDescriptorHeap.Get() /*для текстур*/ };
+	ID3D12DescriptorHeap* heaps[] = { mSrvDescriptorHeap.Get() /*РґР»СЏ С‚РµРєСЃС‚СѓСЂ*/ };
 	mCommandList->SetDescriptorHeaps(_countof(heaps), heaps);
 	mCommandList->SetGraphicsRootSignature(mRootSignature.Get());
 
@@ -2596,12 +2748,13 @@ void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 
 		if (!mPSOs["terrain"])
 		{
-			OutputDebugStringA("Terrain PSO не создан!\n");
+			OutputDebugStringA("Terrain PSO РЅРµ СЃРѕР·РґР°РЅ!\n");
 		}
 
 		mCommandList->SetPipelineState(mPSOs["terrain"].Get());
 		mCommandList->SetGraphicsRootSignature(mTerrainRootSignature.Get());
-		mCommandList->SetGraphicsRootConstantBufferView(4, passCB->GetGPUVirtualAddress());
+		mCommandList->SetGraphicsRootConstantBufferView(5, passCB->GetGPUVirtualAddress());
+		UpdateHeightModificationTexture();
 		DrawTileRenderItems(mCommandList.Get(), m_visibleTerrainTiles, mTerrain->mHmapIndex);
 	}
 
@@ -2699,7 +2852,7 @@ void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 	}
 	
 
-	// После освещения:
+	// РџРѕСЃР»Рµ РѕСЃРІРµС‰РµРЅРёСЏ:
 	D3D12_RESOURCE_BARRIER revertBarrier[3] = {
 		CD3DX12_RESOURCE_BARRIER::Transition(mGBufferAlbedo.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET),
 		CD3DX12_RESOURCE_BARRIER::Transition(mGBufferNormal.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET),
@@ -3146,17 +3299,17 @@ void TexColumnsApp::UpdateTerrain(const GameTimer& gt)
 		return;
 
 
-	// Обновляем позицию камеры
+	// РћР±РЅРѕРІР»СЏРµРј РїРѕР·РёС†РёСЋ РєР°РјРµСЂС‹
 	XMVECTOR camPos = cam.GetPosition();
 	XMFLOAT3 cameraPosition;
 	XMStoreFloat3(&cameraPosition, camPos);
 
-	// Извлекаем плоскости frustum
+	// РР·РІР»РµРєР°РµРј РїР»РѕСЃРєРѕСЃС‚Рё frustum
 	XMMATRIX view = XMLoadFloat4x4(&mView);
 	XMMATRIX proj = XMLoadFloat4x4(&mProj);
 	XMMATRIX viewProj = XMMatrixMultiply(view, proj);
 
-	// Обновляем terrain систему. Это заполняет m_visibleTiles
+	// РћР±РЅРѕРІР»СЏРµРј terrain СЃРёСЃС‚РµРјСѓ. Р­С‚Рѕ Р·Р°РїРѕР»РЅСЏРµС‚ m_visibleTiles
 	mTerrain->Update(cameraPosition, cam.GetFrustum());
 	mTerrain->mHeightScale = heightScale;
 
@@ -3174,11 +3327,10 @@ void TexColumnsApp::DrawTileRenderItems(ID3D12GraphicsCommandList* cmdList, std:
 
 	auto objectCB = mCurrFrameResource->ObjectCB->Resource();
 	auto matCB = mCurrFrameResource->MaterialCB->Resource();
-
+	auto terrCB = mCurrFrameResource->TerrainCB->Resource();
 
 	for (auto& t : tiles)
 	{
-		
 		if (t->rItemIndex < 0 || t->rItemIndex >= mAllRitems.size())
 		{
 			std::cout << "Invalid rItemIndex for tile: " << t->tileIndex << std::endl;
@@ -3191,24 +3343,205 @@ void TexColumnsApp::DrawTileRenderItems(ID3D12GraphicsCommandList* cmdList, std:
 		cmdList->IASetIndexBuffer(&ri->Geo->IndexBufferView());
 		cmdList->IASetPrimitiveTopology(ri->PrimitiveType);
 
+		// РЈСЃС‚Р°РЅРѕРІРєР° РґРµСЃРєСЂРёРїС‚РѕСЂРЅС‹С… С‚Р°Р±Р»РёС† РґР»СЏ С‚РµРєСЃС‚СѓСЂ
+		// РЎР»РѕС‚ 0: heightMap (t0)
 		CD3DX12_GPU_DESCRIPTOR_HANDLE heightHandle(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
 		heightHandle.Offset(HeightIndex, mCbvSrvDescriptorSize);
 		cmdList->SetGraphicsRootDescriptorTable(0, heightHandle);
+
+		// РЎР»РѕС‚ 1: diffuseMap (t1)
 		CD3DX12_GPU_DESCRIPTOR_HANDLE diffuseHandle(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
 		diffuseHandle.Offset(ri->Mat->DiffuseSrvHeapIndex, mCbvSrvDescriptorSize);
 		cmdList->SetGraphicsRootDescriptorTable(1, diffuseHandle);
+
+		// РЎР»РѕС‚ 2: normalMap (t2)
 		CD3DX12_GPU_DESCRIPTOR_HANDLE normalHandle(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
 		normalHandle.Offset(ri->Mat->NormalSrvHeapIndex, mCbvSrvDescriptorSize);
 		cmdList->SetGraphicsRootDescriptorTable(2, normalHandle);
 
-		D3D12_GPU_VIRTUAL_ADDRESS objCBAddress = objectCB->GetGPUVirtualAddress() + ri->ObjCBIndex * objCBByteSize;
-		D3D12_GPU_VIRTUAL_ADDRESS matCBAddress = matCB->GetGPUVirtualAddress() + ri->Mat->MatCBIndex * matCBByteSize;
+		// РЎР»РѕС‚ 3: heightModificationMap (t3) - РќРћР’Р«Р™!
+		if (mHeightModificationSrvIndex >= 0)
+		{
+			CD3DX12_GPU_DESCRIPTOR_HANDLE heightModHandle(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+			heightModHandle.Offset(mHeightModificationSrvIndex, mCbvSrvDescriptorSize);
+			cmdList->SetGraphicsRootDescriptorTable(3, heightModHandle);
+		}
+		else
+		{
+			// Р•СЃР»Рё С‚РµРєСЃС‚СѓСЂР° РёР·РјРµРЅРµРЅРёР№ РЅРµ РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°РЅР°, РјРѕР¶РЅРѕ СѓСЃС‚Р°РЅРѕРІРёС‚СЊ РґРµСЃРєСЂРёРїС‚РѕСЂ null
+			// РР»Рё РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ РґРµСЃРєСЂРёРїС‚РѕСЂ СЃ РЅСѓР»РµРІС‹РјРё Р·РЅР°С‡РµРЅРёСЏРјРё
+			// Р’СЂРµРјРµРЅРЅРѕ СѓСЃС‚Р°РЅР°РІР»РёРІР°РµРј С‚РѕС‚ Р¶Рµ РґРµСЃРєСЂРёРїС‚РѕСЂ, С‡С‚Рѕ Рё РґР»СЏ heightMap
+			cmdList->SetGraphicsRootDescriptorTable(3, heightHandle);
+		}
 
-		cmdList->SetGraphicsRootConstantBufferView(3, objCBAddress);
-		cmdList->SetGraphicsRootConstantBufferView(5, matCBAddress);
-		auto terrCB = mCurrFrameResource->TerrainCB->Resource();
-		mCommandList->SetGraphicsRootConstantBufferView(6, terrCB->GetGPUVirtualAddress() + t->tileIndex * terrCBByteSize);
+		// РЈСЃС‚Р°РЅРѕРІРєР° РєРѕРЅСЃС‚Р°РЅС‚РЅС‹С… Р±СѓС„РµСЂРѕРІ
+		// РЎР»РѕС‚ 4: cbPerObject (b0)
+		D3D12_GPU_VIRTUAL_ADDRESS objCBAddress = objectCB->GetGPUVirtualAddress() + ri->ObjCBIndex * objCBByteSize;
+		cmdList->SetGraphicsRootConstantBufferView(4, objCBAddress);
+
+		// РЎР»РѕС‚ 5: cbPass (b1) - РЈСЃС‚Р°РЅР°РІР»РёРІР°РµС‚СЃСЏ РІ DeferredDraw РїРµСЂРµРґ РІС‹Р·РѕРІРѕРј СЌС‚РѕР№ С„СѓРЅРєС†РёРё
+		// cmdList->SetGraphicsRootConstantBufferView(5, ...); // РЈСЃС‚Р°РЅР°РІР»РёРІР°РµС‚СЃСЏ РІ DeferredDraw
+
+		// РЎР»РѕС‚ 6: cbMaterial (b2)
+		D3D12_GPU_VIRTUAL_ADDRESS matCBAddress = matCB->GetGPUVirtualAddress() + ri->Mat->MatCBIndex * matCBByteSize;
+		cmdList->SetGraphicsRootConstantBufferView(6, matCBAddress);
+
+		// РЎР»РѕС‚ 7: cbTerrainTile (b3)
+		D3D12_GPU_VIRTUAL_ADDRESS tileCBAddress = terrCB->GetGPUVirtualAddress() + t->tileIndex * terrCBByteSize;
+		cmdList->SetGraphicsRootConstantBufferView(7, tileCBAddress);
+
 		cmdList->DrawIndexedInstanced(ri->IndexCount, 1, ri->StartIndexLocation, ri->BaseVertexLocation, 0);
 	}
 
+	static int drawCount = 0;
+	drawCount++;
+	if (drawCount % 60 == 0) // Р’С‹РІРѕРґРёС‚СЊ РєР°Р¶РґСѓСЋ СЃРµРєСѓРЅРґСѓ (РїСЂРё 60 FPS)
+	{
+		std::cout << "Drawing " << tiles.size() << " tiles. "
+			<< "HeightMod SRV index: " << mHeightModificationSrvIndex
+			<< ", Data dirty: " << mHeightModificationDirty << std::endl;
+	}
+
+}
+
+void TexColumnsApp::InitializeHeightModificationTexture()
+{
+	// Р Р°Р·РјРµСЂ РґРѕР»Р¶РµРЅ СЃРѕРІРїР°РґР°С‚СЊ СЃ СЂР°Р·РјРµСЂРѕРј heightmap
+	mHeightModificationWidth = mHeightMapWidth;
+	mHeightModificationHeight = mHeightMapHeight;
+
+	// РРЅРёС†РёР°Р»РёР·РёСЂСѓРµРј РЅСѓР»РµРІС‹РјРё Р·РЅР°С‡РµРЅРёСЏРјРё
+	mHeightModificationData.resize(mHeightModificationWidth * mHeightModificationHeight, 0.0f);
+
+	// РЎРѕР·РґР°РµРј СЂРµСЃСѓСЂСЃ С‚РµРєСЃС‚СѓСЂС‹
+	D3D12_RESOURCE_DESC texDesc = {};
+	texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+	texDesc.Alignment = 0;
+	texDesc.Width = mHeightModificationWidth;
+	texDesc.Height = mHeightModificationHeight;
+	texDesc.DepthOrArraySize = 1;
+	texDesc.MipLevels = 1;
+	texDesc.Format = DXGI_FORMAT_R32_FLOAT;  // РћРґРёРЅ РєР°РЅР°Р» РґР»СЏ РёР·РјРµРЅРµРЅРёСЏ РІС‹СЃРѕС‚С‹
+	texDesc.SampleDesc.Count = 1;
+	texDesc.SampleDesc.Quality = 0;
+	texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+	texDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+	D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+	ThrowIfFailed(md3dDevice->CreateCommittedResource(
+		&heapProps,
+		D3D12_HEAP_FLAG_NONE,
+		&texDesc,
+		D3D12_RESOURCE_STATE_COPY_DEST,
+		nullptr,
+		IID_PPV_ARGS(&mHeightModificationTexture)));
+
+	// РЎРѕР·РґР°РµРј upload heap
+	const UINT64 uploadBufferSize = GetRequiredIntermediateSize(mHeightModificationTexture.Get(), 0, 1);
+	heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+	D3D12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
+	ThrowIfFailed(md3dDevice->CreateCommittedResource(
+		&heapProps,
+		D3D12_HEAP_FLAG_NONE,
+		&bufferDesc,
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&mHeightModificationTextureUpload)));
+
+	// РРЅРёС†РёР°Р»РёР·РёСЂСѓРµРј РЅСѓР»СЏРјРё
+	D3D12_SUBRESOURCE_DATA textureData = {};
+	textureData.pData = mHeightModificationData.data();
+	textureData.RowPitch = mHeightModificationWidth * sizeof(float);
+	textureData.SlicePitch = textureData.RowPitch * mHeightModificationHeight;
+
+	UpdateSubresources(mCommandList.Get(), mHeightModificationTexture.Get(),
+		mHeightModificationTextureUpload.Get(), 0, 0, 1, &textureData);
+
+	// РџРµСЂРµРІРѕРґРёРј РІ СЃРѕСЃС‚РѕСЏРЅРёРµ РґР»СЏ С€РµР№РґРµСЂР°
+	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+		mHeightModificationTexture.Get(),
+		D3D12_RESOURCE_STATE_COPY_DEST,
+		D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+
+	// РЎРѕР·РґР°РµРј SRV РІ РєСѓС‡Рµ РґРµСЃРєСЂРёРїС‚РѕСЂРѕРІ
+	// РќСѓР¶РЅРѕ РґРѕР±Р°РІРёС‚СЊ РјРµСЃС‚Рѕ РІ РєСѓС‡Рµ РґРµСЃРєСЂРёРїС‚РѕСЂРѕРІ РІ BuildDescriptorHeaps
+}
+
+
+void TexColumnsApp::ApplyBrushWithPersistence(const XMFLOAT2& uv, bool raise)
+{
+	// РџСЂРµРѕР±СЂР°Р·СѓРµРј UV РІ РєРѕРѕСЂРґРёРЅР°С‚С‹ С‚РµРєСЃС‚СѓСЂС‹
+	int texX = static_cast<int>(uv.x * mHeightModificationWidth);
+	int texY = static_cast<int>(uv.y * mHeightModificationHeight);
+
+	// Р Р°РґРёСѓСЃ РєРёСЃС‚Рё РІ РїРёРєСЃРµР»СЏС…
+	float brushRadiusPixels = mBrushRadius * mHeightModificationWidth;
+
+	// РћР±Р»Р°СЃС‚СЊ РІР»РёСЏРЅРёСЏ РєРёСЃС‚Рё
+	int minX = max(0, texX - static_cast<int>(brushRadiusPixels));
+	int maxX = (std::min)(static_cast<int>(mHeightModificationWidth), texX + static_cast<int>(brushRadiusPixels));
+	int minY = max(0, texY - static_cast<int>(brushRadiusPixels));
+	int maxY = std::min(static_cast<int>(mHeightModificationHeight), texY + static_cast<int>(brushRadiusPixels));
+
+	for (int y = minY; y < maxY; ++y)
+	{
+		for (int x = minX; x < maxX; ++x)
+		{
+			float dx = x - texX;
+			float dy = y - texY;
+			float dist = sqrtf(dx * dx + dy * dy);
+
+			if (dist <= brushRadiusPixels)
+			{
+				// РЎРіР»Р°Р¶РµРЅРЅРѕРµ Р·Р°С‚СѓС…Р°РЅРёРµ Рє РєСЂР°СЏРј
+				float falloff = 1.0f - (dist / brushRadiusPixels);
+				falloff = falloff * falloff; // РљРІР°РґСЂР°С‚РёС‡РЅРѕРµ Р·Р°С‚СѓС…Р°РЅРёРµ
+
+				// РџСЂРёРјРµРЅСЏРµРј РёР·РјРµРЅРµРЅРёРµ
+				int index = y * mHeightModificationWidth + x;
+				if (raise)
+				{
+					mHeightModificationData[index] += mBrushStrength * falloff;
+				}
+				else
+				{
+					mHeightModificationData[index] -= mBrushStrength * falloff;
+				}
+
+				// РћРіСЂР°РЅРёС‡РёРІР°РµРј Р·РЅР°С‡РµРЅРёСЏ
+				mHeightModificationData[index] = (std::max)(-1.0f, std::min(1.0f, mHeightModificationData[index]));
+			}
+		}
+	}
+
+	mHeightModificationDirty = true;
+}
+
+void TexColumnsApp::UpdateHeightModificationTexture()
+{
+	if (!mHeightModificationDirty)
+		return;
+
+	// РћР±РЅРѕРІР»СЏРµРј С‚РµРєСЃС‚СѓСЂСѓ РЅР° GPU
+	D3D12_SUBRESOURCE_DATA textureData = {};
+	textureData.pData = mHeightModificationData.data();
+	textureData.RowPitch = mHeightModificationWidth * sizeof(float);
+	textureData.SlicePitch = textureData.RowPitch * mHeightModificationHeight;
+
+	// РџРµСЂРµРІРѕРґРёРј РІ СЃРѕСЃС‚РѕСЏРЅРёРµ РґР»СЏ РєРѕРїРёСЂРѕРІР°РЅРёСЏ
+	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+		mHeightModificationTexture.Get(),
+		D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+		D3D12_RESOURCE_STATE_COPY_DEST));
+
+	UpdateSubresources(mCommandList.Get(), mHeightModificationTexture.Get(),
+		mHeightModificationTextureUpload.Get(), 0, 0, 1, &textureData);
+
+	// Р’РѕР·РІСЂР°С‰Р°РµРј РІ СЃРѕСЃС‚РѕСЏРЅРёРµ РґР»СЏ С€РµР№РґРµСЂР°
+	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+		mHeightModificationTexture.Get(),
+		D3D12_RESOURCE_STATE_COPY_DEST,
+		D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+
+	mHeightModificationDirty = false;
 }
