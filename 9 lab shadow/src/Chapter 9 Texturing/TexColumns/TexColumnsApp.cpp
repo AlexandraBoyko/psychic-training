@@ -351,11 +351,6 @@ private:
 	void TexColumnsApp::ApplyBrushWithPersistence(const XMFLOAT2& uv, bool raise);
 	void TexColumnsApp::UpdateHeightModificationTexture();
 
-	void BuildTerrainUpdateRootSignature();
-	void BuildTerrainUpdatePSO();
-	void CreateHeightMapResources();
-	void UpdateTerrainWithCompute();
-	void LoadHeightmapWithUAV(const std::wstring& filename);
 
 
 private:
@@ -678,6 +673,12 @@ void TexColumnsApp::Update(const GameTimer& gt)
 	ImGui_ImplWin32_NewFrame();
 	ImGui::NewFrame();
 	ImGui::Begin("Settings");
+	ImGui::Text("Terrain Brush");
+
+	// Параметры кисти
+	ImGui::SliderFloat("Brush Radius", &mBrushRadius, 0.01f, 0.5f);
+	ImGui::SliderFloat("Brush Strength", &mBrushStrength, 0.01f, 1.0f);
+
 	ImGui::Text("\n\nLights\n\n");
 	AnimateMaterials(gt);
 	UpdateObjectCBs(gt);

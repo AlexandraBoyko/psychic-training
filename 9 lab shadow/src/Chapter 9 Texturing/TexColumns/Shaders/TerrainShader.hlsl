@@ -102,7 +102,7 @@ VertexOut VS(VertexIn vin)
     
     float baseHeight = gHeightMap.SampleLevel(gSamLinearClamp, vout.TexC, 0).r;
     float heightMod = gHeightModificationMap.SampleLevel(gSamLinearClamp, vout.TexC, 0).r;
-    float finalHeight = baseHeight + heightMod * 10.0f;
+    float finalHeight = baseHeight + heightMod;
     
     // Ограничиваем значение
     finalHeight = clamp(finalHeight, 0.0, 1.0);
