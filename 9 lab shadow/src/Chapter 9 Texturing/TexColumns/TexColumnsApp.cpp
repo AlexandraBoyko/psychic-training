@@ -314,6 +314,7 @@ private:
     void BuildRootSignature();
     void BuildLightingRootSignature();
 	void BuildShadowPassRootSignature();
+	void BuildAtmosphereRootSignature();
 	void BuildLights();
 	void SetLightShapes();
 	void BuildDescriptorHeaps();
@@ -369,7 +370,7 @@ private:
 	ComPtr<ID3D12RootSignature> mTerrainRootSignature = nullptr;
 	ComPtr<ID3D12RootSignature> mTerrainComputeRootSignature = nullptr;
 
-
+	ComPtr<ID3D12RootSignature> mAtmosphereRootSignature = nullptr;
 
 	ComPtr<ID3D12DescriptorHeap> mSrvDescriptorHeap = nullptr;
 	ComPtr<ID3D12DescriptorHeap> m_ImGuiSrvDescriptorHeap; // Member variable
@@ -570,9 +571,12 @@ bool TexColumnsApp::Initialize()
     BuildRootSignature();
     BuildLightingRootSignature();
 	BuildShadowPassRootSignature();
+	// ATMO HERE
+	BuildAtmosphereRootSignature();
 	// TERRAIN HERE
 	BuildTerrainRootSignature();
 	BuildTerrainComputeRootSignature();
+	//
 	BuildLights();
 	BuildShadowMapViews();
 	BuildDescriptorHeaps();
@@ -1585,6 +1589,35 @@ void TexColumnsApp::BuildShadowPassRootSignature()
 }
 
 
+void TexColumnsApp::BuildAtmosphereRootSignature()
+{
+	CD3DX12_DESCRIPTOR_RANGE depthRange;
+	depthRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // t0
+
+	CD3DX12_ROOT_PARAMETER params[2];
+	params[0].InitAsDescriptorTable(1, &depthRange, D3D12_SHADER_VISIBILITY_PIXEL);
+	params[1].InitAsConstantBufferView(0); // b0 – cbAtmosphere
+
+	CD3DX12_STATIC_SAMPLER_DESC pointClamp(
+		0,
+		D3D12_FILTER_MIN_MAG_MIP_POINT,
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+
+	CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 1, &pointClamp,
+		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+	ComPtr<ID3DBlob> blob, error;
+	HRESULT hr = D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1,
+		blob.GetAddressOf(), error.GetAddressOf());
+	if (error) OutputDebugStringA((char*)error->GetBufferPointer());
+	ThrowIfFailed(hr);
+	ThrowIfFailed(md3dDevice->CreateRootSignature(0,
+		blob->GetBufferPointer(), blob->GetBufferSize(),
+		IID_PPV_ARGS(&mAtmosphereRootSignature)));
+}
+
 void TexColumnsApp::CreatePointLight(XMFLOAT3 pos, XMFLOAT3 color, float faloff_start, float faloff_end, float strength)
 {
 	Light light;
@@ -1861,6 +1894,9 @@ void TexColumnsApp::BuildShadersAndInputLayout()
 	mShaders["shadowDebugPS"] = d3dUtil::CompileShader(L"Shaders\\LightingPass.hlsl", nullptr, "PS_ShadowDebug", "ps_5_1");
 	mShaders["terrainVS"] = d3dUtil::CompileShader(L"Shaders\\TerrainShader.hlsl", nullptr, "VS", "vs_5_1");
 	mShaders["terrainPS"] = d3dUtil::CompileShader(L"Shaders\\TerrainShader.hlsl", nullptr, "PS", "ps_5_0");
+	//mShaders["skyVS"] = d3dUtil::CompileShader(L"Shaders\\AtmosphereShader.hlsl", nullptr, "VS", "vs_5_1");
+	//mShaders["skyPS"] = d3dUtil::CompileShader(L"Shaders\\AtmosphereShader.hlsl", nullptr, "PS", "ps_5_1");
+
 
 
     mInputLayout =

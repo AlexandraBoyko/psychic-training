@@ -72,7 +72,11 @@ struct AtmosphereConstants
     float    RayleighScattering;               
     float    MieScattering;       
     float    Turbidity;
-    float    padding[3];
+    float    padding0[2];
+    DirectX::XMFLOAT2 InvRenderTargetSize;
+    float    padding1[2];
+    DirectX::XMFLOAT4X4 InvProj;
+    DirectX::XMFLOAT4X4 InvView;
 };
 
 struct Vertex
