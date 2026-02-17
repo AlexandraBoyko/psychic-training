@@ -130,7 +130,4 @@
     <Text Include="Shaders\GeometryPass.hlsl" />
     <Text Include="Shaders\ShadowMap.hlsl" />
   </ItemGroup>
-  <ItemGroup>
-    <FxCompile Include="AtmosphereShader.hlsl" />
-  </ItemGroup>
 </Project>

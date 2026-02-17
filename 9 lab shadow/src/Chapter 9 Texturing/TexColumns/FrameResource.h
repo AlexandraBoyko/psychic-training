@@ -65,16 +65,6 @@ struct TerrainConstants
     float Padding2[2];
 };
 
-struct AtmosphereConstants
-{
-    DirectX::XMFLOAT3 SunDirection;   
-    float    SunIntensity;             
-    float    RayleighScattering;               
-    float    MieScattering;       
-    float    Turbidity;
-    float    padding[3];
-};
-
 struct Vertex
 {
     DirectX::XMFLOAT3 Pos;
@@ -109,7 +99,6 @@ public:
     std::unique_ptr<UploadBuffer<LightConstants>> LightCB = nullptr;
     std::unique_ptr<UploadBuffer<PassShadowConstants>> PassShadowCB = nullptr;
     std::unique_ptr<UploadBuffer<TerrainConstants>> TerrainCB = nullptr;
-    std::unique_ptr<UploadBuffer<AtmosphereConstants>> AtmosphereCB = nullptr;
     // Fence value to mark commands up to this fence point.  This lets us
     // check if these frame resources are still in use by the GPU.
     UINT64 Fence = 0;

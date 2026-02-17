@@ -13,8 +13,6 @@ FrameResource::FrameResource(ID3D12Device* device, UINT passCount, UINT objectCo
     LightCB = std::make_unique<UploadBuffer<LightConstants>>(device, lightCount, true);
     PassShadowCB = std::make_unique<UploadBuffer<PassShadowConstants>>(device, lightCount, true);
     TerrainCB = std::make_unique<UploadBuffer<TerrainConstants>>(device, tileCount, true);
-    AtmosphereCB = std::make_unique<UploadBuffer<AtmosphereConstants>>(device, 1, true);
-
 }
 
 FrameResource::~FrameResource()
