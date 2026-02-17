@@ -308,7 +308,6 @@ private:
 	void UpdateLightCBs(const GameTimer& gt);
 	void UpdateMaterialCBs(const GameTimer& gt);
 	void UpdateMainPassCB(const GameTimer& gt);
-	void UpdateAtmosphereCB();
 	void CreateGBuffer() override;
 	void LoadAllTextures();
 	void LoadTexture(const std::string& name);
@@ -481,13 +480,10 @@ private:
 
 
 	//For atmosphere
-	AtmosphereConstants mAtmosphereConstants;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE mDepthReadOnlyDSV;
 	UINT mDepthSrvHeapIndex;
 	CD3DX12_GPU_DESCRIPTOR_HANDLE mDepthSrvGpuHandle;
 
-	XMFLOAT4X4 mInvView;
-	XMFLOAT4X4 mInvProj;
 
 };
 
@@ -1246,19 +1242,6 @@ void  TexColumnsApp::UpdateTerrainCBs(const GameTimer& gt)
 	}
 	//std::cout << "Size of TerrainConstants in C++: " << sizeof(TerrainConstants) << " bytes\n";
 
-}
-
-void TexColumnsApp::UpdateAtmosphereCB()
-{
-	// Инвертированные матрицы сохраняются в UpdateMainPassCB
-	mAtmosphereConstants.InvView = mInvView;
-	mAtmosphereConstants.InvProj = mInvProj;
-	mAtmosphereConstants.InvRenderTargetSize = XMFLOAT2(1.0f / mClientWidth, 1.0f / mClientHeight);
-
-	// Направление на солнце уже должно быть установлено в UpdateLightCBs
-	// (из направленного света, инвертированное и нормализованное)
-
-	mCurrFrameResource->AtmosphereCB->CopyData(0, mAtmosphereConstants);
 }
 
 void TexColumnsApp::CreateGBuffer()
