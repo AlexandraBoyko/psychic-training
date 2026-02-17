@@ -2474,28 +2474,28 @@ void TexColumnsApp::BuildPSOs()
 
 	//
 	// Atmosphere PSO
-	D3D12_GRAPHICS_PIPELINE_STATE_DESC atmospherePsoDesc = {};
-	atmospherePsoDesc.pRootSignature = mAtmosphereRootSignature.Get();
-	atmospherePsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["skyVS"]->GetBufferPointer()),
-							 mShaders["skyVS"]->GetBufferSize() };
-	atmospherePsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["skyPS"]->GetBufferPointer()),
-							 mShaders["skyPS"]->GetBufferSize() };
-	atmospherePsoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-	atmospherePsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-	atmospherePsoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-	atmospherePsoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-	atmospherePsoDesc.DepthStencilState.DepthEnable = TRUE;
-	atmospherePsoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; // не пишем
-	atmospherePsoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
-	atmospherePsoDesc.SampleMask = UINT_MAX;
-	atmospherePsoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-	atmospherePsoDesc.NumRenderTargets = 1;
-	atmospherePsoDesc.RTVFormats[0] = mBackBufferFormat;
-	atmospherePsoDesc.DSVFormat = mDepthStencilFormat;
-	atmospherePsoDesc.SampleDesc.Count = 1;
-	atmospherePsoDesc.SampleDesc.Quality = 0;
+	//D3D12_GRAPHICS_PIPELINE_STATE_DESC atmospherePsoDesc = {};
+	//atmospherePsoDesc.pRootSignature = mAtmosphereRootSignature.Get();
+	//atmospherePsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["skyVS"]->GetBufferPointer()),
+	//						 mShaders["skyVS"]->GetBufferSize() };
+	//atmospherePsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["skyPS"]->GetBufferPointer()),
+	//						 mShaders["skyPS"]->GetBufferSize() };
+	//atmospherePsoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	//atmospherePsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+	//atmospherePsoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	//atmospherePsoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+	//atmospherePsoDesc.DepthStencilState.DepthEnable = TRUE;
+	//atmospherePsoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; // не пишем
+	//atmospherePsoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+	//atmospherePsoDesc.SampleMask = UINT_MAX;
+	//atmospherePsoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	//atmospherePsoDesc.NumRenderTargets = 1;
+	//atmospherePsoDesc.RTVFormats[0] = mBackBufferFormat;
+	//atmospherePsoDesc.DSVFormat = mDepthStencilFormat;
+	//atmospherePsoDesc.SampleDesc.Count = 1;
+	//atmospherePsoDesc.SampleDesc.Quality = 0;
 
-	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&atmospherePsoDesc, IID_PPV_ARGS(&mPSOs["atmosphere"])));
+	//ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&atmospherePsoDesc, IID_PPV_ARGS(&mPSOs["atmosphere"])));
 }
 
 void TexColumnsApp::BuildFrameResources()
