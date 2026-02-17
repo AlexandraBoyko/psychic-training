@@ -308,6 +308,7 @@ private:
 	void UpdateLightCBs(const GameTimer& gt);
 	void UpdateMaterialCBs(const GameTimer& gt);
 	void UpdateMainPassCB(const GameTimer& gt);
+	void UpdateAtmosphereCB(const GameTimer& gt);
 	void CreateGBuffer() override;
 	void LoadAllTextures();
 	void LoadTexture(const std::string& name);
@@ -354,7 +355,7 @@ private:
 	///
 
 	void BuildSkyRootSignature();
-
+	void BuildSkySphereGeometry();
 
 private:
 	std::unordered_map<std::string, unsigned int>ObjectsMeshCount;
@@ -585,9 +586,18 @@ bool TexColumnsApp::Initialize()
 	BuildTerrainComputeRootSignature();
 	// ATMO
 	BuildSkyRootSignature();
+	//
 	BuildLights();
 	BuildShadowMapViews();
 	BuildDescriptorHeaps();
+
+	mAtmosphereCBData.RayleighScattering = XMFLOAT3(0.0058f, 0.0135f, 0.0331f);
+	mAtmosphereCBData.MieScattering = XMFLOAT3(0.004f, 0.004f, 0.004f);
+	mAtmosphereCBData.MieG = 0.76f;
+	mAtmosphereCBData.DensityMultiplier = 1.0f;
+	mAtmosphereCBData.PollutionLevel = 0.0f;
+	mAtmosphereCBData.SunAngularRadius = 0.035f;
+
 	//TERRAIN STUFF
 	mTerrain = std::make_unique<Terrain>();
 	mTerrain->InitializeTerrain(md3dDevice.Get(), TexOffsets["textures/terr_height"], 512, 6);
@@ -595,6 +605,7 @@ bool TexColumnsApp::Initialize()
 
 	//InitializeHeightModificationTexture();
     BuildShapeGeometry();
+	BuildSkySphereGeometry();
 	SetLightShapes();
     BuildShadersAndInputLayout();
 	BuildMaterials();
@@ -645,7 +656,7 @@ void TexColumnsApp::OnResize()
 	CreateGBuffer();
 	BuildDescriptorHeaps();
     // The window resized, so update the aspect ratio and recompute the projection matrix.
-    XMMATRIX P = XMMatrixPerspectiveFovLH(0.4*MathHelper::Pi, AspectRatio(), 1.0f, 1000.0f);
+    XMMATRIX P = XMMatrixPerspectiveFovLH(0.4*MathHelper::Pi, AspectRatio(), 1.0f, 10000.0f);
     XMStoreFloat4x4(&mProj, P);
 
 
@@ -707,6 +718,7 @@ void TexColumnsApp::Update(const GameTimer& gt)
 
 	UpdateTerrainCBs(gt);
 	UpdateMainPassCB(gt);
+	UpdateAtmosphereCB(gt);
 	ImGui::End();
 }
 
@@ -1044,6 +1056,7 @@ void TexColumnsApp::UpdateLightCBs(const GameTimer& gt)
 			ImGui::DragInt("PCF level", &l.pcf_level, 1, 0, 100);
 
 			ImGui::PopID();
+
 			
 		}
 		else if (l.type == 3)
@@ -1122,6 +1135,34 @@ void TexColumnsApp::UpdateLightCBs(const GameTimer& gt)
 		currLightCB->CopyData(l.LightCBIndex, lConst);
 		lId++;
 	}
+}
+
+void TexColumnsApp::UpdateAtmosphereCB(const GameTimer& gt)
+{
+	// Ищем directional light (первый попавшийся типа 2)
+	for (auto& light : mLights)
+	{
+		if (light.type == 2)
+		{
+			// light.Direction – направление ОТ солнца (как используется для теней)
+			XMVECTOR dirToSun = -XMLoadFloat3(&light.Direction);
+			XMStoreFloat3(&mAtmosphereCBData.SunDirection, dirToSun);
+			mAtmosphereCBData.SunIntensity = light.Strength;
+			break;
+		}
+	}
+
+	// Остальные параметры – можно задать значения по умолчанию или позже вынести в UI
+	mAtmosphereCBData.RayleighScattering = XMFLOAT3(0.058f, 0.0135f, 0.0331f);
+	mAtmosphereCBData.MieScattering = XMFLOAT3(0.004f, 0.004f, 0.004f);
+	mAtmosphereCBData.MieG = 0.76f;
+	mAtmosphereCBData.DensityMultiplier = 1.0f;
+	mAtmosphereCBData.PollutionLevel = 0.0f;
+	mAtmosphereCBData.SunAngularRadius = 0.035f; // ~2 градуса
+
+	// Копируем в буфер текущего frame resource
+	auto currAtmosCB = mCurrFrameResource->AtmosphereCB.get();
+	currAtmosCB->CopyData(0, mAtmosphereCBData);
 }
 
 void TexColumnsApp::UpdateMaterialCBs(const GameTimer& gt)
@@ -1900,6 +1941,8 @@ void TexColumnsApp::BuildShadersAndInputLayout()
 	mShaders["shadowDebugPS"] = d3dUtil::CompileShader(L"Shaders\\LightingPass.hlsl", nullptr, "PS_ShadowDebug", "ps_5_1");
 	mShaders["terrainVS"] = d3dUtil::CompileShader(L"Shaders\\TerrainShader.hlsl", nullptr, "VS", "vs_5_1");
 	mShaders["terrainPS"] = d3dUtil::CompileShader(L"Shaders\\TerrainShader.hlsl", nullptr, "PS", "ps_5_0");
+	mShaders["skyVS"] = d3dUtil::CompileShader(L"Shaders\\AtmoshereShader.hlsl", nullptr, "VS", "vs_5_1");
+	mShaders["skyPS"] = d3dUtil::CompileShader(L"Shaders\\AtmoshereShader.hlsl", nullptr, "PS", "ps_5_1");
 
 
     mInputLayout =
@@ -2054,6 +2097,56 @@ void TexColumnsApp::BuildCustomMeshGeometry(std::string name, UINT& meshVertexOf
 	///////
 	Geo->MultiDrawArgs[name] = meshSubmeshes;
 }
+
+
+void TexColumnsApp::BuildSkySphereGeometry()
+{
+	GeometryGenerator geoGen;
+	auto sphere = geoGen.CreateSphere(800.0f, 50, 50); // большой радиус
+
+	std::vector<Vertex> vertices(sphere.Vertices.size());
+	for (size_t i = 0; i < sphere.Vertices.size(); ++i)
+	{
+		vertices[i].Pos = sphere.Vertices[i].Position;
+		vertices[i].Normal = sphere.Vertices[i].Normal;
+		vertices[i].TexC = sphere.Vertices[i].TexC;
+		vertices[i].Tangent = sphere.Vertices[i].TangentU;
+	}
+
+	std::vector<std::uint16_t> indices = sphere.GetIndices16();
+
+	auto geo = std::make_unique<MeshGeometry>();
+	geo->Name = "skyGeo";
+
+	const UINT vbByteSize = (UINT)vertices.size() * sizeof(Vertex);
+	const UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
+
+	ThrowIfFailed(D3DCreateBlob(vbByteSize, &geo->VertexBufferCPU));
+	CopyMemory(geo->VertexBufferCPU->GetBufferPointer(), vertices.data(), vbByteSize);
+
+	ThrowIfFailed(D3DCreateBlob(ibByteSize, &geo->IndexBufferCPU));
+	CopyMemory(geo->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
+
+	geo->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+		mCommandList.Get(), vertices.data(), vbByteSize, geo->VertexBufferUploader);
+
+	geo->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+		mCommandList.Get(), indices.data(), ibByteSize, geo->IndexBufferUploader);
+
+	geo->VertexByteStride = sizeof(Vertex);
+	geo->VertexBufferByteSize = vbByteSize;
+	geo->IndexFormat = DXGI_FORMAT_R16_UINT;
+	geo->IndexBufferByteSize = ibByteSize;
+
+	SubmeshGeometry submesh;
+	submesh.IndexCount = (UINT)indices.size();
+	submesh.StartIndexLocation = 0;
+	submesh.BaseVertexLocation = 0;
+	geo->DrawArgs["sky"] = submesh;
+
+	mSkyGeo = std::move(geo);
+}
+
 void TexColumnsApp::BuildShapeGeometry()
 {
     GeometryGenerator geoGen;
@@ -2453,6 +2546,36 @@ void TexColumnsApp::BuildPSOs()
 	terrainPsoDesc.DSVFormat = mDepthStencilFormat;
 
 	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&terrainPsoDesc, IID_PPV_ARGS(&mPSOs["terrain"])));
+
+	// Sky PSO
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC skyPsoDesc = {};
+	skyPsoDesc.InputLayout = { mInputLayout.data(), (UINT)mInputLayout.size() };
+	skyPsoDesc.pRootSignature = mSkyRootSignature.Get();
+	skyPsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["skyVS"]->GetBufferPointer()), mShaders["skyVS"]->GetBufferSize() };
+	skyPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["skyPS"]->GetBufferPointer()), mShaders["skyPS"]->GetBufferSize() };
+
+	// Растеризатор: отключаем отсечение задних граней
+	skyPsoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	skyPsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+
+	// Настройки смешивания: стандартные (непрозрачные)
+	skyPsoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+
+	// Depth-stencil: включаем тест глубины, но отключаем запись
+	skyPsoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+	skyPsoDesc.DepthStencilState.DepthEnable = TRUE;
+	skyPsoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+	skyPsoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+
+	skyPsoDesc.SampleMask = UINT_MAX;
+	skyPsoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	skyPsoDesc.NumRenderTargets = 1;
+	skyPsoDesc.RTVFormats[0] = mBackBufferFormat;
+	skyPsoDesc.SampleDesc.Count = 1;
+	skyPsoDesc.SampleDesc.Quality = 0;
+	skyPsoDesc.DSVFormat = mDepthStencilFormat;
+
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&skyPsoDesc, IID_PPV_ARGS(&mPSOs["sky"])));
 }
 
 void TexColumnsApp::BuildFrameResources()
@@ -2780,14 +2903,14 @@ void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 		SwapChainBufferCount + 2, // Начинаем после SwapChain
 		mRtvDescriptorSize
 	) };
-	XMFLOAT4 c(mLights[0].Color.x, mLights[0].Color.y, mLights[0].Color.z,1);
+	XMFLOAT4 c(mLights[0].Color.x, mLights[0].Color.y, mLights[0].Color.z, 1);
 	XMVECTORF32 a;
 	a.v = XMLoadFloat4(&c);
 	for (int i = 0; i < 3; ++i)
 		mCommandList->ClearRenderTargetView(rtvHs[i], a, 0, nullptr);
 	mCommandList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
 	mCommandList->OMSetRenderTargets(3, rtvHs, true, &DepthStencilView());
-	
+
 	ID3D12DescriptorHeap* heaps[] = { mSrvDescriptorHeap.Get() /*для текстур*/ };
 	mCommandList->SetDescriptorHeaps(_countof(heaps), heaps);
 	mCommandList->SetGraphicsRootSignature(mRootSignature.Get());
@@ -2825,20 +2948,20 @@ void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 	};
 	mCommandList->ResourceBarrier(3, barrier);
 	// ================================================
-	
+
 	// ===============LIGHTING PASS=====================
 
 	mCommandList->SetPipelineState(mPSOs["lighting"].Get());
-	
+
 	mCommandList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, &DepthStencilView());
 
 	mCommandList->ClearRenderTargetView(CurrentBackBufferView(), Colors::Black, 0, nullptr);
-	
+
 
 
 
 	mCommandList->SetGraphicsRootSignature(mLightingRootSignature.Get());
-	
+
 	mCommandList->SetDescriptorHeaps(1, mSrvDescriptorHeap.GetAddressOf());
 
 
@@ -2855,8 +2978,8 @@ void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 	mCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 
-	
-	
+
+
 	UINT lightCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(LightConstants));
 	// draw light
 	for (auto& light : mLights)
@@ -2875,7 +2998,7 @@ void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 			mCommandList->SetGraphicsRootDescriptorTable(6, shadowSrvHandle); // t3
 		}
 		// if directional or ambient -> rendering full screen quad
-		if (light.type == 0 || light.type == 2 )
+		if (light.type == 0 || light.type == 2)
 		{
 			mCommandList->SetPipelineState(mPSOs["lightingQUAD"].Get());
 			mCommandList->DrawInstanced(3, 1, 0, 0);
@@ -2903,9 +3026,9 @@ void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 
 			mCommandList->DrawIndexedInstanced(light.ShapeGeo.IndexCount, 1, light.ShapeGeo.StartIndexLocation, light.ShapeGeo.BaseVertexLocation, 0);
 		}
-		
+
 	}
-	
+
 
 	// После освещения:
 	D3D12_RESOURCE_BARRIER revertBarrier[3] = {
@@ -2914,6 +3037,44 @@ void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 		CD3DX12_RESOURCE_BARRIER::Transition(mGBufferPosition.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET)
 	};
 	mCommandList->ResourceBarrier(3, revertBarrier);
+
+
+	// ================= SKY PASS =================
+
+	mCommandList->SetPipelineState(mPSOs["sky"].Get());
+	mCommandList->SetGraphicsRootSignature(mSkyRootSignature.Get());
+
+	// Backbuffer уже в RENDER_TARGET состоянии
+	mCommandList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, &DepthStencilView());
+
+	// Вершинные данные
+	mCommandList->IASetVertexBuffers(0, 1, &mSkyGeo->VertexBufferView());
+	mCommandList->IASetIndexBuffer(&mSkyGeo->IndexBufferView());
+	mCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	// b0 – PassConstants
+	mCommandList->SetGraphicsRootConstantBufferView(
+		0,
+		mCurrFrameResource->PassCB->Resource()->GetGPUVirtualAddress()
+	);
+
+	// b1 – AtmosphereConstants
+	mCommandList->SetGraphicsRootConstantBufferView(
+		1,
+		mCurrFrameResource->AtmosphereCB->Resource()->GetGPUVirtualAddress()
+	);
+
+	auto& submesh = mSkyGeo->DrawArgs["sky"];
+
+	mCommandList->DrawIndexedInstanced(
+		submesh.IndexCount,
+		1,
+		submesh.StartIndexLocation,
+		submesh.BaseVertexLocation,
+		0
+	);
+
+
 
 	ImGui::Render();
 	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), mCommandList.Get());
@@ -2957,7 +3118,275 @@ void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 
 }
 
-
+//void TexColumnsApp::DeferredDraw(const GameTimer& gt)
+//{
+//	//Terrain Stuff
+//
+//	//UpdateHeightModificationTexture();
+//	m_visibleTerrainTiles.clear();
+//	mTerrain->GetVisibleTiles(m_visibleTerrainTiles);
+//	/*std::cout << "Tiles total:" << mTerrain->GetAllTiles().size() << std::endl;
+//	std::cout << "Visible tiles: " << m_visibleTerrainTiles.size() << std::endl;*/
+//	//std::cout << "HeightIndex: " << mTerrain->mHmapIndex << std::endl;
+//	//
+//	//for (auto t : m_visibleTerrainTiles)
+//	//{
+//	//	std::cout << t->tileIndex << " Pos: " << t->worldPos.x << "," << t->worldPos.y <<  "," << t->worldPos.z << " LOD: " << t->lodLevel << std::endl; 
+//	//}
+//
+//	auto cmdListAlloc = mCurrFrameResource->CmdListAlloc;
+//	ThrowIfFailed(cmdListAlloc->Reset());
+//	ThrowIfFailed(mCommandList->Reset(cmdListAlloc.Get(), nullptr));
+//
+//	// Получаем указатель на PassCB один раз для всего кадра
+//	auto passCB = mCurrFrameResource->PassCB->Resource();
+//
+//	// draw shadow maps 
+//	DrawSceneToShadowMap();
+//
+//	// =========================================================================
+//	// НОВЫЙ БЛОК: Рендеринг неба (Sky Pass)
+//	// =========================================================================
+//	// Переводим back buffer в состояние RENDER_TARGET (если ещё не в нём)
+//	//mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
+//	//	D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+//
+//	//// Очищаем depth buffer (небо не пишет глубину, но depth test включён)
+//	//mCommandList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
+//
+//	//// Устанавливаем back buffer как единственный render target, depth buffer для теста
+//	//mCommandList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, &DepthStencilView());
+//
+//	//// Устанавливаем PSO и корневую сигнатуру для неба
+//	//mCommandList->SetPipelineState(mPSOs["sky"].Get());
+//	//mCommandList->SetGraphicsRootSignature(mSkyRootSignature.Get());
+//
+//	//// Передаём константные буферы
+//	//mCommandList->SetGraphicsRootConstantBufferView(0, passCB->GetGPUVirtualAddress());
+//
+//	//auto atmosCB = mCurrFrameResource->AtmosphereCB->Resource();
+//	//mCommandList->SetGraphicsRootConstantBufferView(1, atmosCB->GetGPUVirtualAddress());
+//
+//	//// Рисуем небесную сферу
+//	//mCommandList->IASetVertexBuffers(0, 1, &mSkyGeo->VertexBufferView());
+//	//mCommandList->IASetIndexBuffer(&mSkyGeo->IndexBufferView());
+//	//mCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+//	//auto skyDrawArgs = mSkyGeo->DrawArgs["sky"];
+//	//mCommandList->DrawIndexedInstanced(skyDrawArgs.IndexCount, 1,
+//	//	skyDrawArgs.StartIndexLocation, skyDrawArgs.BaseVertexLocation, 0);
+//	// =========================================================================
+//
+//	// ==GEOMETRY PASS==
+//	mCommandList->SetPipelineState(mPSOs["gbuffer"].Get());
+//
+//	mCommandList->RSSetViewports(1, &mScreenViewport);
+//	mCommandList->RSSetScissorRects(1, &mScissorRect);
+//
+//	// Этот барьер теперь не нужен, так как мы уже перевели back buffer в RENDER_TARGET выше.
+//	// Оставляем закомментированным для сохранения структуры кода.
+//	/*
+//	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
+//		D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+//	*/
+//
+//	// Обнуляем буферы G-Buffer
+//	// Очищаем каждый G-Buffer и глубину
+//	// Стало:
+//	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHs[] = {
+//	CD3DX12_CPU_DESCRIPTOR_HANDLE(
+//		mRtvHeap->GetCPUDescriptorHandleForHeapStart(),
+//		SwapChainBufferCount, // Начинаем после SwapChain
+//		mRtvDescriptorSize
+//	),
+//	CD3DX12_CPU_DESCRIPTOR_HANDLE(
+//		mRtvHeap->GetCPUDescriptorHandleForHeapStart(),
+//		SwapChainBufferCount + 1, // Начинаем после SwapChain
+//		mRtvDescriptorSize
+//	),
+//	CD3DX12_CPU_DESCRIPTOR_HANDLE(
+//		mRtvHeap->GetCPUDescriptorHandleForHeapStart(),
+//		SwapChainBufferCount + 2, // Начинаем после SwapChain
+//		mRtvDescriptorSize
+//	) };
+//	//XMFLOAT4 c(mLights[0].Color.x, mLights[0].Color.y, mLights[0].Color.z, 1);
+//	//XMVECTORF32 a;
+//	//a.v = XMLoadFloat4(&c);
+//	//for (int i = 0; i < 3; ++i)
+//	//	mCommandList->ClearRenderTargetView(rtvHs[i], a, 0, nullptr);
+//
+//	float clearColorBlack[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+//	for (int i = 0; i < 3; ++i)
+//		mCommandList->ClearRenderTargetView(rtvHs[i], clearColorBlack, 0, nullptr);
+//
+//	mCommandList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
+//	mCommandList->OMSetRenderTargets(3, rtvHs, true, &DepthStencilView());
+//
+//	ID3D12DescriptorHeap* heaps[] = { mSrvDescriptorHeap.Get() /*для текстур*/ };
+//	mCommandList->SetDescriptorHeaps(_countof(heaps), heaps);
+//	mCommandList->SetGraphicsRootSignature(mRootSignature.Get());
+//
+//	// Используем ранее полученный passCB
+//	mCommandList->SetGraphicsRootConstantBufferView(3, passCB->GetGPUVirtualAddress());
+//
+//	DrawRenderItems(mCommandList.Get(), mOpaqueRitems);
+//
+//	// ===============RENDERING TERRAIN=====================
+//	if (!m_visibleTerrainTiles.empty())
+//	{
+//
+//		if (!mPSOs["terrain"])
+//		{
+//			OutputDebugStringA("Terrain PSO не создан!\n");
+//		}
+//
+//		mCommandList->SetPipelineState(mPSOs["terrain"].Get());
+//		mCommandList->SetGraphicsRootSignature(mTerrainRootSignature.Get());
+//		mCommandList->SetGraphicsRootConstantBufferView(5, passCB->GetGPUVirtualAddress());
+//		UpdateHeightModificationTexture();
+//		DrawTileRenderItems(mCommandList.Get(), m_visibleTerrainTiles, mTerrain->mHmapIndex);
+//	}
+//
+//
+//
+//	D3D12_RESOURCE_BARRIER barrier[3] = {
+//	CD3DX12_RESOURCE_BARRIER::Transition(mGBufferAlbedo.Get(),
+//		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
+//	CD3DX12_RESOURCE_BARRIER::Transition(mGBufferNormal.Get(),
+//		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
+//	CD3DX12_RESOURCE_BARRIER::Transition(mGBufferPosition.Get(),
+//		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+//	};
+//	mCommandList->ResourceBarrier(3, barrier);
+//	// ================================================
+//
+//	// ===============LIGHTING PASS=====================
+//
+//	mCommandList->SetPipelineState(mPSOs["lighting"].Get());
+//
+//	mCommandList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, &DepthStencilView());
+//
+//	// Убираем очистку back buffer, чтобы сохранить нарисованное небо.
+//	// mCommandList->ClearRenderTargetView(CurrentBackBufferView(), Colors::Black, 0, nullptr);
+//
+//	mCommandList->SetGraphicsRootSignature(mLightingRootSignature.Get());
+//
+//	mCommandList->SetDescriptorHeaps(1, mSrvDescriptorHeap.GetAddressOf());
+//
+//
+//	CD3DX12_GPU_DESCRIPTOR_HANDLE positionHandle(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+//	positionHandle.Offset(mTextures.size() + 0, mCbvSrvDescriptorSize);
+//	CD3DX12_GPU_DESCRIPTOR_HANDLE normalHandle(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+//	normalHandle.Offset(mTextures.size() + 1, mCbvSrvDescriptorSize);
+//	CD3DX12_GPU_DESCRIPTOR_HANDLE albedoHandle(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+//	albedoHandle.Offset(mTextures.size() + 2, mCbvSrvDescriptorSize);
+//	mCommandList->SetGraphicsRootDescriptorTable(0, positionHandle); // t0
+//	mCommandList->SetGraphicsRootDescriptorTable(1, normalHandle); // t1
+//	mCommandList->SetGraphicsRootDescriptorTable(2, albedoHandle); // t2
+//	mCommandList->SetGraphicsRootConstantBufferView(3, passCB->GetGPUVirtualAddress()); //b0
+//	mCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+//
+//
+//
+//
+//	UINT lightCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(LightConstants));
+//	// draw light
+//	for (auto& light : mLights)
+//	{
+//		auto lightCB = mCurrFrameResource->LightCB->Resource();
+//		mCommandList->IASetVertexBuffers(0, 1, &mGeometries["shapeGeo"]->VertexBufferView());
+//		mCommandList->IASetIndexBuffer(&mGeometries["shapeGeo"]->IndexBufferView());
+//
+//		D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress = lightCB->GetGPUVirtualAddress() + light.LightCBIndex * lightCBByteSize;
+//		mCommandList->SetGraphicsRootConstantBufferView(5, lightCBAddress); // b2
+//
+//		if (light.CastsShadows) // Only bind shadow map if this light uses it
+//		{
+//			CD3DX12_GPU_DESCRIPTOR_HANDLE shadowSrvHandle(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+//			shadowSrvHandle.Offset(light.ShadowMapSrvHeapIndex, mCbvSrvDescriptorSize);
+//			mCommandList->SetGraphicsRootDescriptorTable(6, shadowSrvHandle); // t3
+//		}
+//		// if directional or ambient -> rendering full screen quad
+//		if (light.type == 0 || light.type == 2)
+//		{
+//			mCommandList->SetPipelineState(mPSOs["lightingQUAD"].Get());
+//			mCommandList->DrawInstanced(3, 1, 0, 0);
+//		}
+//		else
+//		{
+//			mCommandList->SetPipelineState(mPSOs["lighting"].Get());
+//			mCommandList->DrawIndexedInstanced(light.ShapeGeo.IndexCount, 1, light.ShapeGeo.StartIndexLocation, light.ShapeGeo.BaseVertexLocation, 0);
+//		}
+//	}
+//
+//
+//	// draw light shapes
+//	mCommandList->SetPipelineState(mPSOs["lightingShapes"].Get());
+//	for (auto& light : mLights)
+//	{
+//		if (light.type != 0 && light.type != 2 && light.isDebugOn == 1)
+//		{
+//			auto lightCB = mCurrFrameResource->LightCB->Resource();
+//			mCommandList->IASetVertexBuffers(0, 1, &mGeometries["shapeGeo"]->VertexBufferView());
+//			mCommandList->IASetIndexBuffer(&mGeometries["shapeGeo"]->IndexBufferView());
+//
+//			D3D12_GPU_VIRTUAL_ADDRESS lightCBAddress = lightCB->GetGPUVirtualAddress() + light.LightCBIndex * lightCBByteSize;
+//			mCommandList->SetGraphicsRootConstantBufferView(5, lightCBAddress);
+//
+//			mCommandList->DrawIndexedInstanced(light.ShapeGeo.IndexCount, 1, light.ShapeGeo.StartIndexLocation, light.ShapeGeo.BaseVertexLocation, 0);
+//		}
+//
+//	}
+//
+//
+//	// После освещения:
+//	D3D12_RESOURCE_BARRIER revertBarrier[3] = {
+//		CD3DX12_RESOURCE_BARRIER::Transition(mGBufferAlbedo.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET),
+//		CD3DX12_RESOURCE_BARRIER::Transition(mGBufferNormal.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET),
+//		CD3DX12_RESOURCE_BARRIER::Transition(mGBufferPosition.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET)
+//	};
+//	mCommandList->ResourceBarrier(3, revertBarrier);
+//
+//	ImGui::Render();
+//	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), mCommandList.Get());
+//
+//	ID3D12DescriptorHeap* correctHeaps[] = { mSrvDescriptorHeap.Get() };
+//
+//	mCommandList->SetDescriptorHeaps(_countof(correctHeaps), correctHeaps);
+//
+//
+//
+//	//DrawShadowDebug(mCommandList.Get(), 256);
+//
+//
+//
+//	// Then transition to PRESENT state
+//
+//	D3D12_RESOURCE_BARRIER presentBarrier = CD3DX12_RESOURCE_BARRIER::Transition(
+//		CurrentBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+//	mCommandList->ResourceBarrier(1, &presentBarrier);
+//
+//
+//	// Done recording commands.
+//	ThrowIfFailed(mCommandList->Close());
+//
+//	// Add the command list to the queue for execution.
+//	ID3D12CommandList* cmdsLists[] = { mCommandList.Get() };
+//	mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
+//
+//
+//	// Swap the back and front buffers
+//	ThrowIfFailed(mSwapChain->Present(0, 0));
+//	mCurrBackBuffer = (mCurrBackBuffer + 1) % SwapChainBufferCount;
+//
+//	// Advance the fence value to mark commands up to this fence point.
+//	mCurrFrameResource->Fence = ++mCurrentFence;
+//
+//	// Add an instruction to the command queue to set a new fence point. 
+//	// Because we are on the GPU timeline, the new fence point won't be 
+//	// set until the GPU finishes processing all the commands prior to this Signal().
+//	mCommandQueue->Signal(mFence.Get(), mCurrentFence);
+//
+//}
 
 
 void TexColumnsApp::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::vector<RenderItem*>& ritems)
