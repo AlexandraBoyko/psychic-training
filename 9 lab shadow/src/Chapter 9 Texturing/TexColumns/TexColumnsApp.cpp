@@ -482,8 +482,6 @@ private:
 
 	//For atmosphere
 	AtmosphereConstants mAtmosphereConstants;
-
-
 	CD3DX12_CPU_DESCRIPTOR_HANDLE mDepthReadOnlyDSV;
 	UINT mDepthSrvHeapIndex;
 	CD3DX12_GPU_DESCRIPTOR_HANDLE mDepthSrvGpuHandle;
@@ -585,11 +583,6 @@ bool TexColumnsApp::Initialize()
 	BuildShadowPassRootSignature();
 	// ATMO HERE
 	BuildAtmosphereRootSignature();
-	mAtmosphereConstants.RayleighScattering = 1.0f;
-	mAtmosphereConstants.MieScattering = 0.1f;
-	mAtmosphereConstants.Turbidity = 1.0f;
-	mAtmosphereConstants.SunIntensity = 1.2f;
-	mAtmosphereConstants.SunDirection = XMFLOAT3(0, 1, 0); // солнце в зените
 	// TERRAIN HERE
 	BuildTerrainRootSignature();
 	BuildTerrainComputeRootSignature();
@@ -720,7 +713,6 @@ void TexColumnsApp::Update(const GameTimer& gt)
 	UpdateObjectCBs(gt);
 	UpdateMaterialCBs(gt);
 	UpdateLightCBs(gt);
-	
 
 	if (mBrushActive)
 	{
@@ -732,7 +724,6 @@ void TexColumnsApp::Update(const GameTimer& gt)
 
 	UpdateTerrainCBs(gt);
 	UpdateMainPassCB(gt);
-	UpdateAtmosphereCB();
 	ImGui::End();
 }
 
@@ -1912,25 +1903,6 @@ void TexColumnsApp::BuildDescriptorHeaps()
 	md3dDevice->CreateShaderResourceView(mHeightModificationTexture.Get(), &srvDesc, srvHandle);
 	mHeightModificationSrvHandle = srvHandle;
 
-	// Индекс для depth SRV (идёт после heightModification)
-	mDepthSrvHeapIndex = mHeightModificationSrvIndex + 1; // или вычислите точно
-	CD3DX12_CPU_DESCRIPTOR_HANDLE depthSrvCpu(mSrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-	depthSrvCpu.Offset(mDepthSrvHeapIndex, mCbvSrvDescriptorSize);
-
-	D3D12_SHADER_RESOURCE_VIEW_DESC depthSrvDesc = {};
-	depthSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-	depthSrvDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS; // соответствует формату depth-stencil
-	depthSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-	depthSrvDesc.Texture2D.MostDetailedMip = 0;
-	depthSrvDesc.Texture2D.MipLevels = 1;
-	depthSrvDesc.Texture2D.PlaneSlice = 0;
-	depthSrvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
-
-	md3dDevice->CreateShaderResourceView(mDepthStencilBuffer.Get(), &depthSrvDesc, depthSrvCpu);
-
-	mDepthSrvGpuHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(
-		mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart(),
-		mDepthSrvHeapIndex, mCbvSrvDescriptorSize);
 
 	HRESULT hr = md3dDevice->GetDeviceRemovedReason();
 	if (FAILED(hr))
@@ -3002,43 +2974,6 @@ void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 		CD3DX12_RESOURCE_BARRIER::Transition(mGBufferPosition.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET)
 	};
 	mCommandList->ResourceBarrier(3, revertBarrier);
-
-
-
-	// =============== SKY PASS (Atmosphere) ===============
-
-// Переводим depth buffer в состояние, позволяющее читать через DSV и SRV
-	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
-		mDepthStencilBuffer.Get(),
-		D3D12_RESOURCE_STATE_DEPTH_WRITE,
-		D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
-
-	// Устанавливаем PSO и корневую сигнатуру
-	mCommandList->SetPipelineState(mPSOs["atmosphere"].Get());
-	mCommandList->SetGraphicsRootSignature(mAtmosphereRootSignature.Get());
-
-	// Привязываем backbuffer и read-only DSV
-	mCommandList->OMSetRenderTargets(1, &CurrentBackBufferView(), TRUE, &mDepthReadOnlyDSV);
-
-	// Устанавливаем depth SRV в таблицу (t0)
-	mCommandList->SetGraphicsRootDescriptorTable(0, mDepthSrvGpuHandle);
-
-	// Обновляем cbAtmosphere и привязываем
-	UpdateAtmosphereCB();
-	mCommandList->SetGraphicsRootConstantBufferView(1,
-		mCurrFrameResource->AtmosphereCB->Resource()->GetGPUVirtualAddress());
-
-	// Рендерим fullscreen треугольник
-	mCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	mCommandList->DrawInstanced(3, 1, 0, 0);
-
-	// Возвращаем depth buffer обратно в DEPTH_WRITE
-	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
-		mDepthStencilBuffer.Get(),
-		D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-		D3D12_RESOURCE_STATE_DEPTH_WRITE));
-
-
 
 	ImGui::Render();
 	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), mCommandList.Get());
