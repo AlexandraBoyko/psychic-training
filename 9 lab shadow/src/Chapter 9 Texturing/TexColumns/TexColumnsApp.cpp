@@ -479,12 +479,6 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12RootSignature> mTerrainUpdateRootSignature;
 
 
-	//For atmosphere
-	CD3DX12_CPU_DESCRIPTOR_HANDLE mDepthReadOnlyDSV;
-	UINT mDepthSrvHeapIndex;
-	CD3DX12_GPU_DESCRIPTOR_HANDLE mDepthSrvGpuHandle;
-
-
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
@@ -646,22 +640,7 @@ void TexColumnsApp::OnResize()
     XMMATRIX P = XMMatrixPerspectiveFovLH(0.4*MathHelper::Pi, AspectRatio(), 1.0f, 1000.0f);
     XMStoreFloat4x4(&mProj, P);
 
-	// Получаем размер дескриптора DSV
-	UINT dsvDescriptorSize = md3dDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
 
-	// Первый дескриптор (индекс 0) уже создан как mDepthStencilView.
-	// Второй дескриптор (индекс 1) – для read-only
-	mDepthReadOnlyDSV = CD3DX12_CPU_DESCRIPTOR_HANDLE(
-		mDsvHeap->GetCPUDescriptorHandleForHeapStart(),
-		1, dsvDescriptorSize);
-
-	D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
-	dsvDesc.Format = mDepthStencilFormat;
-	dsvDesc.Flags = D3D12_DSV_FLAG_READ_ONLY_DEPTH;  // ключевой флаг
-	dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-	dsvDesc.Texture2D.MipSlice = 0;
-
-	md3dDevice->CreateDepthStencilView(mDepthStencilBuffer.Get(), &dsvDesc, mDepthReadOnlyDSV);
 }
 
 void TexColumnsApp::Update(const GameTimer& gt)
@@ -1808,7 +1787,7 @@ void TexColumnsApp::BuildDescriptorHeaps()
 	// Create the SRV heap.
 	//
 	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
-	srvHeapDesc.NumDescriptors = mTextures.size() + 3 + mLights.size() + 1 +1 + 1;
+	srvHeapDesc.NumDescriptors = mTextures.size() + 3 + mLights.size() + 1 +1;
 	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&mSrvDescriptorHeap)));
@@ -1915,8 +1894,8 @@ void TexColumnsApp::BuildShadersAndInputLayout()
 	mShaders["shadowDebugPS"] = d3dUtil::CompileShader(L"Shaders\\LightingPass.hlsl", nullptr, "PS_ShadowDebug", "ps_5_1");
 	mShaders["terrainVS"] = d3dUtil::CompileShader(L"Shaders\\TerrainShader.hlsl", nullptr, "VS", "vs_5_1");
 	mShaders["terrainPS"] = d3dUtil::CompileShader(L"Shaders\\TerrainShader.hlsl", nullptr, "PS", "ps_5_0");
-	mShaders["skyVS"] = d3dUtil::CompileShader(L"Shaders\\AtmosphereShader.hlsl", nullptr, "VS", "vs_5_1");
-	mShaders["skyPS"] = d3dUtil::CompileShader(L"Shaders\\AtmosphereShader.hlsl", nullptr, "PS", "ps_5_1");
+	//mShaders["skyVS"] = d3dUtil::CompileShader(L"Shaders\\AtmosphereShader.hlsl", nullptr, "VS", "vs_5_1");
+	//mShaders["skyPS"] = d3dUtil::CompileShader(L"Shaders\\AtmosphereShader.hlsl", nullptr, "PS", "ps_5_1");
 
 
 
@@ -2471,31 +2450,6 @@ void TexColumnsApp::BuildPSOs()
 	terrainPsoDesc.DSVFormat = mDepthStencilFormat;
 
 	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&terrainPsoDesc, IID_PPV_ARGS(&mPSOs["terrain"])));
-
-	//
-	// Atmosphere PSO
-	//D3D12_GRAPHICS_PIPELINE_STATE_DESC atmospherePsoDesc = {};
-	//atmospherePsoDesc.pRootSignature = mAtmosphereRootSignature.Get();
-	//atmospherePsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["skyVS"]->GetBufferPointer()),
-	//						 mShaders["skyVS"]->GetBufferSize() };
-	//atmospherePsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["skyPS"]->GetBufferPointer()),
-	//						 mShaders["skyPS"]->GetBufferSize() };
-	//atmospherePsoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-	//atmospherePsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-	//atmospherePsoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-	//atmospherePsoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-	//atmospherePsoDesc.DepthStencilState.DepthEnable = TRUE;
-	//atmospherePsoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; // не пишем
-	//atmospherePsoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
-	//atmospherePsoDesc.SampleMask = UINT_MAX;
-	//atmospherePsoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-	//atmospherePsoDesc.NumRenderTargets = 1;
-	//atmospherePsoDesc.RTVFormats[0] = mBackBufferFormat;
-	//atmospherePsoDesc.DSVFormat = mDepthStencilFormat;
-	//atmospherePsoDesc.SampleDesc.Count = 1;
-	//atmospherePsoDesc.SampleDesc.Quality = 0;
-
-	//ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&atmospherePsoDesc, IID_PPV_ARGS(&mPSOs["atmosphere"])));
 }
 
 void TexColumnsApp::BuildFrameResources()
