@@ -65,6 +65,20 @@ struct TerrainConstants
     float Padding2[2];
 };
 
+struct AtmosphereConstants
+{
+    DirectX::XMFLOAT3 SunDirection;
+    float SunIntensity;
+    DirectX::XMFLOAT3 RayleighScattering;
+    float MieG;
+    DirectX::XMFLOAT3 MieScattering;
+    float DensityMultiplier;
+    float PollutionLevel;
+    float SunAngularRadius;
+    float padding[2];
+};
+static_assert((sizeof(AtmosphereConstants) % 16) == 0, "constant buffer size must be 16-byte aligned");
+
 struct Vertex
 {
     DirectX::XMFLOAT3 Pos;
@@ -99,6 +113,7 @@ public:
     std::unique_ptr<UploadBuffer<LightConstants>> LightCB = nullptr;
     std::unique_ptr<UploadBuffer<PassShadowConstants>> PassShadowCB = nullptr;
     std::unique_ptr<UploadBuffer<TerrainConstants>> TerrainCB = nullptr;
+    std::unique_ptr<UploadBuffer<AtmosphereConstants>> AtmosphereCB = nullptr;
     // Fence value to mark commands up to this fence point.  This lets us
     // check if these frame resources are still in use by the GPU.
     UINT64 Fence = 0;

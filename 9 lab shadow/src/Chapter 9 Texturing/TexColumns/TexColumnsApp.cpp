@@ -351,6 +351,9 @@ private:
 	void TexColumnsApp::ApplyBrushWithPersistence(const XMFLOAT2& uv, bool raise);
 	void TexColumnsApp::UpdateHeightModificationTexture();
 
+	///
+
+	void BuildSkyRootSignature();
 
 
 private:
@@ -368,6 +371,8 @@ private:
 	ComPtr<ID3D12RootSignature> mShadowPassRootSignature = nullptr;
 	ComPtr<ID3D12RootSignature> mTerrainRootSignature = nullptr;
 	ComPtr<ID3D12RootSignature> mTerrainComputeRootSignature = nullptr;
+	//
+	ComPtr<ID3D12RootSignature> mSkyRootSignature;
 
 
 
@@ -477,6 +482,11 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12PipelineState> mTerrainUpdatePSO;
 	Microsoft::WRL::ComPtr<ID3D12RootSignature> mTerrainUpdateRootSignature;
 
+	/// Atmosphere
+
+	std::unique_ptr<MeshGeometry> mSkyGeo;
+	AtmosphereConstants mAtmosphereCBData;
+
 
 };
 
@@ -573,6 +583,8 @@ bool TexColumnsApp::Initialize()
 	// TERRAIN HERE
 	BuildTerrainRootSignature();
 	BuildTerrainComputeRootSignature();
+	// ATMO
+	BuildSkyRootSignature();
 	BuildLights();
 	BuildShadowMapViews();
 	BuildDescriptorHeaps();
@@ -1582,6 +1594,33 @@ void TexColumnsApp::BuildShadowPassRootSignature()
 		serializedRootSig->GetBufferPointer(),
 		serializedRootSig->GetBufferSize(),
 		IID_PPV_ARGS(&mShadowPassRootSignature)));
+}
+
+void TexColumnsApp::BuildSkyRootSignature()
+{
+	CD3DX12_ROOT_PARAMETER slotRootParameter[2];
+
+	// b0 – PassConstants
+	slotRootParameter[0].InitAsConstantBufferView(0);
+	// b1 – AtmosphereConstants
+	slotRootParameter[1].InitAsConstantBufferView(1);
+
+	// Статические сэмплеры не нужны, можно передать пустой массив
+	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(2, slotRootParameter, 0, nullptr,
+		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+	ComPtr<ID3DBlob> serializedRootSig = nullptr;
+	ComPtr<ID3DBlob> errorBlob = nullptr;
+	HRESULT hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
+		serializedRootSig.GetAddressOf(), errorBlob.GetAddressOf());
+	if (errorBlob != nullptr)
+		::OutputDebugStringA((char*)errorBlob->GetBufferPointer());
+	ThrowIfFailed(hr);
+
+	ThrowIfFailed(md3dDevice->CreateRootSignature(0,
+		serializedRootSig->GetBufferPointer(),
+		serializedRootSig->GetBufferSize(),
+		IID_PPV_ARGS(&mSkyRootSignature)));
 }
 
 
