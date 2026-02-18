@@ -556,8 +556,8 @@ bool TexColumnsApp::Initialize()
 	freopen("CONOUT$", "w", stdout);
 	freopen("CONOUT$", "w", stderr);
 
-	cam.SetPosition(0, 3, 10);
-	cam.RotateY(MathHelper::Pi);
+	cam.SetPosition(200, 100, 200);
+	cam.RotateY(MathHelper::Pi/2);
     if(!D3DApp::Initialize())
         return false;
 
