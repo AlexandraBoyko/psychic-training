@@ -596,7 +596,8 @@ bool TexColumnsApp::Initialize()
 	mAtmosphereCBData.MieG = 0.76f;
 	mAtmosphereCBData.DensityMultiplier = 1.0f;
 	mAtmosphereCBData.PollutionLevel = 0.0f;
-	mAtmosphereCBData.SunAngularRadius = 0.035f;
+	mAtmosphereCBData.SunAngularRadius = 0.2f;
+	mAtmosphereCBData.SunIntensity = 1.0f;
 
 	//TERRAIN STUFF
 	mTerrain = std::make_unique<Terrain>();
@@ -703,6 +704,25 @@ void TexColumnsApp::Update(const GameTimer& gt)
 	ImGui::SliderFloat("Brush Strength", &mBrushStrength, 0.01f, 1.0f);
 
 	ImGui::Text("\n\nLights\n\n");
+
+	//
+	ImGui::Separator();
+	ImGui::Text("Atmosphere Settings");
+	ImGui::ColorEdit3("Rayleigh", (float*)&mAtmosphereCBData.RayleighScattering);
+	ImGui::ColorEdit3("Mie", (float*)&mAtmosphereCBData.MieScattering);
+
+	ImGui::SliderFloat("Mie G", &mAtmosphereCBData.MieG, 0.0f, 0.99f);
+
+	ImGui::SliderFloat("Density", &mAtmosphereCBData.DensityMultiplier, 0.1f, 10.0f);
+
+	ImGui::SliderFloat("Pollution", &mAtmosphereCBData.PollutionLevel, 0.0f, 1.0f);
+
+	ImGui::SliderFloat("Sun Size", &mAtmosphereCBData.SunAngularRadius, 0.001f, 1.0f);
+
+	ImGui::SliderFloat("Sun Intensity (override)",
+		&mAtmosphereCBData.SunIntensity,
+		0.0f, 20.0f);
+
 	AnimateMaterials(gt);
 	UpdateObjectCBs(gt);
 	UpdateMaterialCBs(gt);
@@ -1147,18 +1167,18 @@ void TexColumnsApp::UpdateAtmosphereCB(const GameTimer& gt)
 			// light.Direction – направление ОТ солнца (как используется для теней)
 			XMVECTOR dirToSun = -XMLoadFloat3(&light.Direction);
 			XMStoreFloat3(&mAtmosphereCBData.SunDirection, dirToSun);
-			mAtmosphereCBData.SunIntensity = light.Strength;
+			//mAtmosphereCBData.SunIntensity = light.Strength;
 			break;
 		}
 	}
 
 	// Остальные параметры – можно задать значения по умолчанию или позже вынести в UI
-	mAtmosphereCBData.RayleighScattering = XMFLOAT3(0.058f, 0.0135f, 0.0331f);
-	mAtmosphereCBData.MieScattering = XMFLOAT3(0.004f, 0.004f, 0.004f);
-	mAtmosphereCBData.MieG = 0.76f;
-	mAtmosphereCBData.DensityMultiplier = 1.0f;
-	mAtmosphereCBData.PollutionLevel = 0.0f;
-	mAtmosphereCBData.SunAngularRadius = 0.035f; // ~2 градуса
+	//mAtmosphereCBData.RayleighScattering = XMFLOAT3(0.058f, 0.0135f, 0.0331f);
+	//mAtmosphereCBData.MieScattering = XMFLOAT3(0.004f, 0.004f, 0.004f);
+	//mAtmosphereCBData.MieG = 0.76f;
+	//mAtmosphereCBData.DensityMultiplier = 1.0f;
+	//mAtmosphereCBData.PollutionLevel = 0.0f;
+	//mAtmosphereCBData.SunAngularRadius = 0.035f; // ~2 градуса
 
 	// Копируем в буфер текущего frame resource
 	auto currAtmosCB = mCurrFrameResource->AtmosphereCB.get();
@@ -1704,7 +1724,7 @@ void TexColumnsApp::BuildLights()
 	Light dir;
 	dir.LightCBIndex = mLights.size();
 	dir.Position = { 0,300,0 };
-	dir.Direction = { 0, -1, 0 };
+	dir.Direction = { 0, -1, 1 };
 	dir.Color = { 1,1,1 };
 	dir.Strength = 1.2;
 	dir.type = 2;

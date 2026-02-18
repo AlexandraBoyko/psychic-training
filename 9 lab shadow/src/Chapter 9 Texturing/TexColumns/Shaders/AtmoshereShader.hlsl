@@ -132,11 +132,12 @@ float4 PS(VS_OUTPUT pin) : SV_TARGET
     mieShift.b = 1.0f - densityFactor * 0.5f;
     mieContribution *= mieShift;
     
-    // —борка цвета
+
     float3 skyColor = baseSkyColor * 0.3f + rayleighContribution + mieContribution;
     
-    // —олнечный диск
-    float sunAngularRadius = max(SunAngularRadius, 0.15f);
+
+    //float sunAngularRadius = max(SunAngularRadius, 0.15f);
+    float sunAngularRadius = SunAngularRadius;
     float sunCosAngle = cos(sunAngularRadius);
     float sunProximity = saturate((cosTheta - sunCosAngle) / (1.0f - sunCosAngle + 0.01f));
     if (sunProximity > 0.0f)
