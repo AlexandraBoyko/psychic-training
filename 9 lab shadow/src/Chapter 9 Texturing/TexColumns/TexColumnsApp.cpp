@@ -1003,7 +1003,7 @@ void TexColumnsApp::UpdateObjectCBs(const GameTimer& gt)
 
 void TexColumnsApp::UpdateLightCBs(const GameTimer& gt)
 {
-	ImGui::Checkbox("Rotating/Flashy lights", &f);
+	ImGui::Checkbox("Day Night Cycle", &f);
 
 	auto currLightCB = mCurrFrameResource->LightCB.get();
 	auto currShadowCB = mCurrFrameResource->PassShadowCB.get();
@@ -1063,7 +1063,19 @@ void TexColumnsApp::UpdateLightCBs(const GameTimer& gt)
 
 			ImGui::DragFloat("Strength", &l.Strength, 0.1f, 0, 100);
 
-			if (f) { l.Direction = { 0.5f * cos(gt.TotalTime()), -1.0f, 0.5f * sin(gt.TotalTime()) }; }
+			//if (f) { l.Direction = { 0.5f * cos(gt.TotalTime()), -1.0f, 0.5f * sin(gt.TotalTime()) }; }
+
+			if (f) {
+				float t = gt.TotalTime() * 0.5f;
+
+				XMFLOAT3 dir;
+				dir.x = cosf(t);
+				dir.y = sinf(t);
+				dir.z = 0.0f;
+
+				XMVECTOR v = XMVector3Normalize(XMLoadFloat3(&dir));
+				XMStoreFloat3(&l.Direction, v);
+			}
 
 			bool b = l.CastsShadows;
 			ImGui::Checkbox("Cast Shadows", &b);
